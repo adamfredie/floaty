@@ -778,74 +778,113 @@ class FloatyExtension {
       }
       this._dictationInterim = interimTranscript
 
+      // Show interim text at caret position using mirror div
+      const interimOverlay = document.getElementById("interimOverlay")
+      const interimMirror = document.getElementById("interimMirror")
       const noteText = document.getElementById("noteText")
-      if (noteText) {
-        let prevInterim = noteText.querySelector('.interim-span');
+      if (interimOverlay && interimMirror && noteText) {
         if (interimTranscript && this.isListening) {
-          if (prevInterim) {
-            // Update interim in place
-            prevInterim.textContent = interimTranscript;
-          } else {
-            // Insert interim at caret
-            const sel = window.getSelection();
-            let range = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null;
-            if (range && noteText.contains(range.startContainer)) {
-              const interimSpan = document.createElement('span');
-              interimSpan.className = 'interim-span';
-              interimSpan.textContent = interimTranscript;
-              range.insertNode(interimSpan);
-              // Move caret after interim
-              range.setStartAfter(interimSpan);
-              range.collapse(true);
-              sel.removeAllRanges();
-              sel.addRange(range);
-            } else {
-              const interimSpan = document.createElement('span');
-              interimSpan.className = 'interim-span';
-              interimSpan.textContent = interimTranscript;
-              noteText.appendChild(interimSpan);
-            }
+          // Mirror textarea style
+          const style = window.getComputedStyle(noteText)
+          interimMirror.style.font = style.font
+          interimMirror.style.fontSize = style.fontSize
+          interimMirror.style.fontFamily = style.fontFamily
+          interimMirror.style.lineHeight = style.lineHeight
+          interimMirror.style.padding = style.padding
+          interimMirror.style.border = style.border
+          interimMirror.style.boxSizing = style.boxSizing
+          interimMirror.style.width = noteText.offsetWidth + 'px'
+          interimMirror.style.height = noteText.offsetHeight + 'px'
+          interimMirror.style.letterSpacing = style.letterSpacing
+          interimMirror.style.whiteSpace = 'pre-wrap'
+          interimMirror.style.wordWrap = 'break-word'
+          // Get text up to caret
+          const value = noteText.value
+          const caret = noteText.selectionStart
+          const beforeCaret = value.substring(0, caret)
+          // Replace spaces and newlines for HTML rendering
+          const beforeCaretHtml = beforeCaret.replace(/\n/g, '<br>').replace(/ /g, '&nbsp;')
+          // Fill mirror with text up to caret and a marker span
+          interimMirror.innerHTML = beforeCaretHtml + '<span id="caretMarker">\u200b</span>'
+          // Get caret marker position
+          const marker = interimMirror.querySelector('#caretMarker')
+          const mirrorRect = interimMirror.getBoundingClientRect()
+          let caretLeft = 0, caretTop = 0
+          if (marker) {
+            const markerRect = marker.getBoundingClientRect()
+            caretLeft = markerRect.left - mirrorRect.left
+            caretTop = markerRect.top - mirrorRect.top
           }
-        } else if (prevInterim) {
-          // Only remove interim when not speaking or on final
-          prevInterim.remove();
+          // Show only the interim text at caret position
+          interimOverlay.style.display = "block"
+          interimOverlay.innerHTML = ''
+          const span = document.createElement('span')
+          span.style.color = '#bbb'
+          span.style.position = 'absolute'
+          span.style.left = caretLeft + 'px'
+          span.style.top = caretTop + 'px'
+          span.style.pointerEvents = 'none'
+          span.style.background = 'transparent'
+          span.style.whiteSpace = 'pre-wrap'
+          // Set max-width so that wrapping starts at left edge of textarea
+          const taWidth = noteText.offsetWidth
+          span.style.maxWidth = (taWidth - caretLeft - 16) + 'px' // 16px for padding
+          span.textContent = interimTranscript
+          interimOverlay.appendChild(span)
+          interimOverlay.scrollTop = noteText.scrollTop
+          // Remove placeholder when overlay is shown
+          if (!this._originalPlaceholder) {
+            this._originalPlaceholder = noteText.placeholder
+          }
+          noteText.placeholder = ''
+        } else {
+          interimOverlay.style.display = "none"
+          interimOverlay.innerHTML = ""
+          // Restore placeholder when overlay is hidden
+          if (this._originalPlaceholder && noteText) {
+            noteText.placeholder = this._originalPlaceholder
+          }
         }
       }
 
       if (finalTranscript) {
         setTimeout(() => {
           const noteText = document.getElementById("noteText")
+          const interimOverlay = document.getElementById("interimOverlay")
           if (noteText) {
-            // Replace interim with final bold span
-            const prevInterim = noteText.querySelector('.interim-span');
-            if (prevInterim) {
-              const finalSpan = document.createElement('span');
-              finalSpan.className = 'final-span';
-              finalSpan.textContent = prevInterim.textContent;
-              prevInterim.replaceWith(finalSpan);
-            } else {
-              // If no interim, just insert at caret
-              const sel = window.getSelection();
-              let range = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null;
-              if (range && noteText.contains(range.startContainer)) {
-                const finalSpan = document.createElement('span');
-                finalSpan.className = 'final-span';
-                finalSpan.textContent = finalTranscript;
-                range.insertNode(finalSpan);
-                // Move caret after final
-                range.setStartAfter(finalSpan);
-                range.collapse(true);
-                sel.removeAllRanges();
-                sel.addRange(range);
-              } else {
-                const finalSpan = document.createElement('span');
-                finalSpan.className = 'final-span';
-                finalSpan.textContent = finalTranscript;
-                noteText.appendChild(finalSpan);
-              }
+            // Insert at caret position, add space if needed
+            const start = noteText.selectionStart
+            const end = noteText.selectionEnd
+            const value = noteText.value
+            const before = value.substring(0, start)
+            const after = value.substring(end)
+            let insertText = finalTranscript
+            // Add space if not at start, not after a space, and not after a newline
+            if (
+              before.length > 0 &&
+              !/\s$/.test(before) &&
+              !/\n$/.test(before)
+            ) {
+              insertText = ' ' + insertText
             }
+            noteText.value = before + insertText + after
+            // Move caret to after inserted text
+            const caret = before.length + insertText.length
+            noteText.selectionStart = noteText.selectionEnd = caret
+            noteText.focus()
           }
-        }, 1000);
+          // Clear interim overlay
+          if (interimOverlay) {
+            interimOverlay.style.display = "none"
+            interimOverlay.innerHTML = ""
+          }
+          // Clear interim display
+          const status = document.getElementById("dictationStatus")
+          if (status) {
+            status.querySelector("span").textContent = `Listening...`
+          }
+          this._dictationInterim = ""
+        }, 1)
       }
     }
 
@@ -1224,7 +1263,6 @@ class FloatyExtension {
     const context = contextField?.value?.trim() || ""
 
     console.log('[Floaty] Adding note with text:', noteText.substring(0, 100) + '...')
-    console.log('[Floaty] Extract tasks checkbox checked:', extractTasks?.checked)
 
     // Get current tab URL and title
     let currentUrl = ''
@@ -1242,83 +1280,25 @@ class FloatyExtension {
     // Generate title using Gemini
     const title = await this.gemini.generateTitle(noteText, context)
 
-    // Extract action items using non-AI fallback for every note
+    // Extract action items only if the checkbox is checked
     let actionItems = [];
-    let extractionLog = '';
     
-    // Always try to extract action items, regardless of checkbox
-    try {
-      console.log('[Floaty] Attempting to extract action items...')
-      
-      // Always use the non-AI fallback method
-      const extractedItems = this.gemini.fallbackActionItems(noteText);
-      console.log('[Floaty] Extracted items from fallback:', extractedItems)
-      
-      if (extractedItems && extractedItems.length > 0) {
-        actionItems = extractedItems.map(item => ({ text: item, completed: false }));
-        extractionLog = 'Non-AI fallback extracted action items: ' + JSON.stringify(actionItems);
-      } else {
-        // Fallback: split sentences and pick the first as a task
-        const sentences = noteText.split(/[.!?]+/).map(s => s.trim()).filter(Boolean);
-        console.log('[Floaty] No action items found, trying sentence fallback. Sentences:', sentences)
+    if (extractTasks && extractTasks.checked) {
+      try {
+        console.log('[Floaty] Extracting action items...')
+        const extractedItems = this.gemini.fallbackActionItems(noteText);
         
-        if (sentences.length > 0) {
-          actionItems = [{ text: sentences[0], completed: false }];
-          extractionLog = 'Fallback to first sentence: ' + JSON.stringify(actionItems);
-        } else {
-          // Ultimate fallback: create a simple task from the note text
-          const simpleTask = noteText.length > 50 ? noteText.substring(0, 50) + '...' : noteText;
-          actionItems = [{ text: `Review: ${simpleTask}`, completed: false }];
-          extractionLog = 'Ultimate fallback task: ' + JSON.stringify(actionItems);
+        if (extractedItems && extractedItems.length > 0) {
+          actionItems = extractedItems.map(item => ({ text: item, completed: false }));
+          console.log('[Floaty] Extracted action items:', actionItems);
         }
-      }
-    } catch (error) {
-      console.error('[Floaty] Error extracting action items:', error)
-      extractionLog = 'Error extracting action items (non-AI): ' + error;
-      
-      // Fallback: split sentences and pick the first as a task
-      const sentences = noteText.split(/[.!?]+/).map(s => s.trim()).filter(Boolean);
-      if (sentences.length > 0) {
-        actionItems = [{ text: sentences[0], completed: false }];
-        extractionLog += '\nFallback action item: ' + JSON.stringify(actionItems);
-      } else {
-        // Ultimate fallback
-        const simpleTask = noteText.length > 50 ? noteText.substring(0, 50) + '...' : noteText;
-        actionItems = [{ text: `Review: ${simpleTask}`, completed: false }];
-        extractionLog += '\nUltimate fallback task: ' + JSON.stringify(actionItems);
+      } catch (error) {
+        console.error('[Floaty] Error extracting action items:', error)
       }
     }
-    
-    console.log('[Floaty] Final action items:', actionItems)
-    console.log('[Floaty] Action item extraction log:', extractionLog)
 
-    // Force at least one action item if none were generated
-    if (actionItems.length === 0) {
-      const fallbackTask = `Review: ${noteText.substring(0, 50)}${noteText.length > 50 ? '...' : ''}`
-      actionItems = [{ text: fallbackTask, completed: false }]
-      console.log('[Floaty] Created forced fallback action item:', fallbackTask)
-    }
-
-    // ALWAYS ensure we have at least one action item
-    if (actionItems.length === 0) {
-      actionItems = [{ text: "Review this note", completed: false }]
-      console.log('[Floaty] Created default action item')
-    }
-
-    // Create the note
+    // Create a single note object
     const note = {
-      id: Date.now(),
-      content: noteText,
-      context: context,
-      title: title,
-      actionItems: actionItems,
-      createdAt: new Date().toISOString(),
-      savedAt: new Date().toISOString()
-    }
-
-    // Add to notes and saved items
-    this.notes.push(note)
-    const newNote = {
       id: Date.now() + Math.floor(Math.random() * 1000000),
       title: title,
       content: noteText,
@@ -1331,35 +1311,27 @@ class FloatyExtension {
       pageTitle: currentTitle
     };
     
-    console.log('[Floaty] Saving note with action items:', newNote.actionItems)
-    console.log('[Floaty] Action items count:', newNote.actionItems.length)
-    console.log('[Floaty] Action items content:', JSON.stringify(newNote.actionItems))
+    console.log('[Floaty] Saving note with action items:', note.actionItems)
     
-    this.savedItems.unshift(newNote); // <-- Add to savedItems
+    // Add to saved items only (not to both notes and savedItems)
+    this.savedItems.unshift(note);
     this.saveData()
-    this.renderNotes()
     this.renderSavedItems()
     
-    // Force re-render after a short delay to ensure action items are displayed
-    setTimeout(() => {
-      console.log('[Floaty] Re-rendering saved items...')
-      this.renderSavedItems()
-    }, 100)
-    
-    // Show detailed notification about action items
+    // Show notification
     if (actionItems.length > 0) {
-      this.showNotification(`✅ Note saved with ${actionItems.length} action item${actionItems.length > 1 ? 's' : ''}: ${actionItems.map(item => item.text || item).join(', ')}`)
+      this.showNotification(`✅ Note saved with ${actionItems.length} action item${actionItems.length > 1 ? 's' : ''}`)
     } else {
-      this.showNotification('❌ Note saved but no action items generated')
+      this.showNotification('✅ Note saved successfully')
     }
 
     // Clear inputs
     noteTextArea.value = ""
     if (contextField) contextField.value = ""
 
-    // Show task detection dialog if tasks were found
-    if (actionItems.length > 0) {
-      // Convert to task objects
+    // Only show task detection dialog if tasks were found AND user wants to add them to global tasks
+    if (actionItems.length > 0 && extractTasks && extractTasks.checked) {
+      // Convert to task objects for the dialog
       const tasks = actionItems.map(item => ({ text: item.text || item, context, priority: 'medium' }))
       this.showTaskDetectionDialog(tasks)
     }
@@ -1590,7 +1562,7 @@ class FloatyExtension {
     container.innerHTML = this.highlights
       .map(
         (highlight) => `
-            <div class="highlight-item" data-id="${highlight.id}">
+            <div class="highlight-item" data-id="${highlight.id}" style="margin-bottom: 28px;">
                 <div class="highlight-content">
                     <div style="font-weight: 600; margin-bottom: 6px; color: var(--text-primary);">
                         ${highlight.title || 'Highlighted Text'}
@@ -1650,69 +1622,18 @@ class FloatyExtension {
     const container = document.getElementById("savedList")
     if (!container) return
 
-    console.log('[Floaty] Rendering saved items, count:', this.savedItems.length)
-    
     if (this.savedItems.length === 0) {
       container.innerHTML =
         '<div style="padding: 20px; text-align: center; color: var(--text-muted);">No saved items</div>'
       return
     }
-    
-    // Log action items for each saved item
-    this.savedItems.forEach((item, index) => {
-      console.log(`[Floaty] Item ${index}:`, {
-        id: item.id,
-        title: item.title,
-        actionItemsCount: item.actionItems?.length || 0,
-        actionItems: item.actionItems,
-        actionItemsType: typeof item.actionItems,
-        actionItemsIsArray: Array.isArray(item.actionItems)
-      })
-    })
 
     // Generate HTML for each saved item
     const htmlContent = this.savedItems
       .map(
         (item) => {
-          console.log(`[Floaty] Processing action items for item ${item.id}:`, {
-            actionItems: item.actionItems,
-            hasActionItems: !!item.actionItems,
-            actionItemsLength: item.actionItems?.length || 0
-          });
-          
-          const actionItemsHtml = item.actionItems && item.actionItems.length > 0 
-            ? `<div style="margin-top: 14px; padding: 10px 12px; background: #e0f2fe; border: 2px solid #0ea5e9; border-radius: 8px; font-size: 13px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                  <span style="font-weight: 600; color: #0ea5e9; letter-spacing: 0.01em;">✅ Action Items (${item.actionItems.length})</span>
-                  <button class="add-action-item-btn" data-item-id="${item.id}" style="background: none; border: none; color: var(--accent-color); cursor: pointer; padding: 4px 8px; font-size: 11px; border-radius: 4px;">+ Add Item</button>
-                </div>
-                <div style="margin: 4px 0 0 0; color: var(--text-primary);">
-                  ${item.actionItems.map((task, index) => `
-                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px; padding: 4px 0; border-radius: 4px;">
-                      <input type="checkbox" class="action-item-checkbox" data-item-id="${item.id}" data-task-index="${index}" ${task.completed ? 'checked' : ''} style="width: 16px; height: 16px; cursor: pointer; accent-color: var(--accent-color);">
-                      <span class="action-item-text" data-item-id="${item.id}" data-task-index="${index}" style="${task.completed ? 'text-decoration: line-through; opacity: 0.6;' : ''}; cursor: pointer; flex: 1; font-size: 13px;">${task.text || task}</span>
-                      <button class="action-item-edit-btn" data-item-id="${item.id}" data-task-index="${index}" style="background: none; border: none; color: var(--accent-color); cursor: pointer; padding: 4px; font-size: 12px; opacity: 0.7; border-radius: 3px;">✏️</button>
-                      <button class="action-item-delete-btn" data-item-id="${item.id}" data-task-index="${index}" style="background: none; border: none; color: #ef4444; cursor: pointer; padding: 4px; font-size: 12px; opacity: 0.7; border-radius: 3px;">🗑️</button>
-                    </div>
-                  `).join('')}
-                </div>
-              </div>`
-            : `<div style="margin-top: 14px; padding: 10px 12px; background: #e0f2fe; border: 2px solid #0ea5e9; border-radius: 8px; font-size: 13px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                  <span style="font-weight: 600; color: #0ea5e9; letter-spacing: 0.01em;">✅ Action Items (1)</span>
-                  <button class="add-action-item-btn" data-item-id="${item.id}" style="background: none; border: none; color: var(--accent-color); cursor: pointer; padding: 4px 8px; font-size: 11px; border-radius: 4px;">+ Add Item</button>
-                </div>
-                <div style="margin: 4px 0 0 0; color: var(--text-primary);">
-                  <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px; padding: 4px 0; border-radius: 4px;">
-                    <input type="checkbox" class="action-item-checkbox" data-item-id="${item.id}" data-task-index="0" style="width: 16px; height: 16px; cursor: pointer; accent-color: var(--accent-color);">
-                    <span class="action-item-text" data-item-id="${item.id}" data-task-index="0" style="cursor: pointer; flex: 1; font-size: 13px;">TEST ACTION ITEM - This should be visible</span>
-                    <button class="action-item-edit-btn" data-item-id="${item.id}" data-task-index="0" style="background: none; border: none; color: var(--accent-color); cursor: pointer; padding: 4px; font-size: 12px; opacity: 0.7; border-radius: 3px;">✏️</button>
-                    <button class="action-item-delete-btn" data-item-id="${item.id}" data-task-index="0" style="background: none; border: none; color: #ef4444; cursor: pointer; padding: 4px; font-size: 12px; opacity: 0.7; border-radius: 3px;">🗑️</button>
-                  </div>
-                </div>
-              </div>`;
-          
-          console.log(`[Floaty] Generated action items HTML for item ${item.id}:`, actionItemsHtml.substring(0, 200) + '...');
+          // Action items should only be shown in the modal, not in the preview
+          const actionItemsHtml = '';
 
           return `
             <div class="saved-note-clean" data-id="${item.id}" style="background: var(--bg-primary); border-radius: 18px; padding: 24px 28px 20px 28px; margin-bottom: 28px; border: 1px solid var(--border-color); box-shadow: none;">
@@ -1731,22 +1652,7 @@ class FloatyExtension {
       )
       .join("");
 
-    console.log('[Floaty] Generated HTML for saved items:', htmlContent.substring(0, 500) + '...');
-    console.log('[Floaty] Action items HTML length:', htmlContent.length);
     container.innerHTML = htmlContent;
-    
-    // Debug: Check if action items are in the DOM
-    setTimeout(() => {
-      const actionItemElements = container.querySelectorAll('.action-item-checkbox');
-      console.log('[Floaty] Found action item checkboxes in DOM:', actionItemElements.length);
-      actionItemElements.forEach((checkbox, index) => {
-        console.log(`[Floaty] Action item ${index}:`, {
-          checked: checkbox.checked,
-          itemId: checkbox.dataset.itemId,
-          taskIndex: checkbox.dataset.taskIndex
-        });
-      });
-    }, 100);
 
     // Add event listeners using event delegation
     container.onclick = (e) => {
@@ -1757,32 +1663,12 @@ class FloatyExtension {
         this.editSavedItem(itemId);
       } else if (e.target.closest('.delete-saved-item')) {
         this.deleteSavedItem(itemId);
-      } else if (
-        e.target.closest('.add-action-item-btn') ||
-        e.target.classList.contains('action-item-edit-btn') ||
-        e.target.classList.contains('action-item-delete-btn') ||
-        e.target.classList.contains('action-item-text') ||
-        e.target.classList.contains('note-url')
-      ) {
+      } else if (e.target.classList.contains('note-url')) {
         // handled below
       } else {
         // Open modal on card click (but not on button/icon click)
         const item = this.savedItems.find(i => i.id === itemId);
         if (item) this.showNoteModal(item);
-      }
-      // Action item edit
-      if (e.target.classList.contains('action-item-edit-btn') || e.target.classList.contains('action-item-text')) {
-        const taskIndex = parseInt(e.target.dataset.taskIndex);
-        this.editActionItem(itemId, taskIndex);
-      }
-      // Action item delete
-      if (e.target.classList.contains('action-item-delete-btn')) {
-        const taskIndex = parseInt(e.target.dataset.taskIndex);
-        this.deleteActionItem(itemId, taskIndex);
-      }
-      // Add new action item
-      if (e.target.classList.contains('add-action-item-btn')) {
-        this.addNewActionItem(itemId);
       }
       // Open URL
       if (e.target.classList.contains('note-url')) {
@@ -1792,17 +1678,7 @@ class FloatyExtension {
         }
       }
     };
-    // Add event listeners for action item checkboxes
-    container.onchange = (e) => {
-      if (e.target.classList.contains('action-item-checkbox')) {
-        const card = e.target.closest('.saved-note-clean');
-        if (!card) return;
-        const itemId = parseInt(card.dataset.id);
-        const taskIndex = parseInt(e.target.dataset.taskIndex);
-        const isChecked = e.target.checked;
-        this.toggleActionItem(itemId, taskIndex, isChecked);
-      }
-    };
+
   }
 
   searchSavedItems(query) {
@@ -1899,7 +1775,7 @@ class FloatyExtension {
     container.innerHTML = filteredHighlights
       .map(
         (highlight) => `
-            <div class="highlight-item" data-id="${highlight.id}">
+            <div class="highlight-item" data-id="${highlight.id}" style="margin-bottom: 28px;">
                 <div class="highlight-content">
                     <div style="font-weight: 600; margin-bottom: 6px; color: var(--text-primary);">
                         ${highlight.title || 'Highlighted Text'}
@@ -2637,7 +2513,7 @@ class FloatyExtension {
 
   // Data Persistence
   async saveData() {
-    const notes = this.savedItems.map(item => ({
+    const savedItems = this.savedItems.map(item => ({
       id: item.id,
       title: item.title,
       content: item.content,
@@ -2646,7 +2522,7 @@ class FloatyExtension {
       actionItems: item.actionItems || [],
       summary: item.summary || '',
       tasks: item.tasks,
-      date: item.savedAt,
+      savedAt: item.savedAt,
       url: item.url || '',
       pageTitle: item.pageTitle || ''
     }));
@@ -2669,7 +2545,7 @@ class FloatyExtension {
       source: task.source || null
     }));
     
-    chrome.storage.local.set({ notes, highlights, tasks });
+    chrome.storage.local.set({ savedItems, highlights, tasks });
   }
 
   async loadData() {
@@ -2695,8 +2571,7 @@ class FloatyExtension {
           tasksCount: response.data.tasks?.length || 0
         })
         
-        this.notes = response.data.notes || []
-        this.savedItems = response.data.savedItems || []
+        this.savedItems = response.data.savedItems || response.data.notes || []
         this.highlights = response.data.highlights || []
         this.tasks = response.data.tasks || []
         
@@ -2720,26 +2595,7 @@ class FloatyExtension {
           }
         })
         
-        // Also convert notes array
-        this.notes.forEach(note => {
-          if (!note.actionItems) note.actionItems = []
-          if (!note.summary) note.summary = ''
-          if (!note.url) note.url = ''
-          if (!note.pageTitle) note.pageTitle = ''
-          
-          // Convert old string action items to objects
-          if (note.actionItems.length > 0) {
-            note.actionItems = note.actionItems.map(actionItem => {
-              if (typeof actionItem === 'string') {
-                return { text: actionItem, completed: false }
-              }
-              return actionItem
-            })
-          }
-        })
-        
         this.renderTasks()
-        this.renderNotes()
         this.renderSavedItems()
         this.renderHighlights()
       } else {
@@ -2826,21 +2682,40 @@ class FloatyExtension {
       return this.detectedTasks[index]
     })
 
-    // Add selected tasks to the tasks list
+    // Only add tasks to global tasks list if they're not already action items in notes
+    let addedCount = 0
     selectedTasks.forEach(task => {
-      this.tasks.push({
-        id: Date.now() + Math.floor(Math.random() * 1000000),
-        text: task.text,
-        context: task.context,
-        priority: task.priority,
-        completed: false,
-        createdAt: new Date().toISOString()
-      })
+      // Check if this task already exists as an action item in any saved note
+      const isDuplicate = this.savedItems.some(item => 
+        item.actionItems && item.actionItems.some(actionItem => {
+          const actionText = typeof actionItem === 'string' ? actionItem : actionItem.text
+          return actionText.toLowerCase() === task.text.toLowerCase()
+        })
+      )
+
+      // Only add if it's not a duplicate
+      if (!isDuplicate) {
+        this.tasks.push({
+          id: Date.now() + Math.floor(Math.random() * 1000000),
+          text: task.text,
+          context: task.context,
+          priority: task.priority,
+          completed: false,
+          createdAt: new Date().toISOString()
+        })
+        addedCount++
+      }
     })
 
     // Update storage and UI
-    this.saveData()
-    this.renderTasks()
+    if (addedCount > 0) {
+      this.saveData()
+      this.renderTasks()
+      this.showNotification(`Added ${addedCount} new task${addedCount > 1 ? 's' : ''} to global list`)
+    } else {
+      this.showNotification('All selected tasks are already action items in your notes')
+    }
+    
     this.hideTaskDetectionDialog()
   }
 
@@ -2856,19 +2731,6 @@ class FloatyExtension {
       }
     } else {
       item.actionItems[taskIndex].completed = isChecked
-    }
-
-    // Update the corresponding note as well
-    const note = this.notes.find(n => n.id === itemId)
-    if (note && note.actionItems && note.actionItems[taskIndex]) {
-      if (typeof note.actionItems[taskIndex] === 'string') {
-        note.actionItems[taskIndex] = {
-          text: note.actionItems[taskIndex],
-          completed: isChecked
-        }
-      } else {
-        note.actionItems[taskIndex].completed = isChecked
-      }
     }
 
     this.saveData()
@@ -2948,19 +2810,6 @@ class FloatyExtension {
           item.actionItems[taskIndex].text = newText
         }
 
-        // Update the corresponding note as well
-        const note = this.notes.find(n => n.id === itemId)
-        if (note && note.actionItems && note.actionItems[taskIndex]) {
-          if (typeof note.actionItems[taskIndex] === 'string') {
-            note.actionItems[taskIndex] = {
-              text: newText,
-              completed: false
-            }
-          } else {
-            note.actionItems[taskIndex].text = newText
-          }
-        }
-
         this.saveData()
         this.renderSavedItems()
         this.showNotification('Action item updated successfully')
@@ -2998,12 +2847,6 @@ class FloatyExtension {
     if (confirm(`Are you sure you want to delete this action item?\n\n"${actionText}"`)) {
       // Remove the action item
       item.actionItems.splice(taskIndex, 1)
-
-      // Update the corresponding note as well
-      const note = this.notes.find(n => n.id === itemId)
-      if (note && note.actionItems && note.actionItems[taskIndex]) {
-        note.actionItems.splice(taskIndex, 1)
-      }
 
       this.saveData()
       this.renderSavedItems()
@@ -3073,18 +2916,6 @@ class FloatyExtension {
           text: newText,
           completed: false
         })
-
-        // Update the corresponding note as well
-        const note = this.notes.find(n => n.id === itemId)
-        if (note) {
-          if (!note.actionItems) {
-            note.actionItems = []
-          }
-          note.actionItems.push({
-            text: newText,
-            completed: false
-          })
-        }
 
         this.saveData()
         this.renderSavedItems()
