@@ -778,113 +778,74 @@ class FloatyExtension {
       }
       this._dictationInterim = interimTranscript
 
-      // Show interim text at caret position using mirror div
-      const interimOverlay = document.getElementById("interimOverlay")
-      const interimMirror = document.getElementById("interimMirror")
       const noteText = document.getElementById("noteText")
-      if (interimOverlay && interimMirror && noteText) {
+      if (noteText) {
+        let prevInterim = noteText.querySelector('.interim-span');
         if (interimTranscript && this.isListening) {
-          // Mirror textarea style
-          const style = window.getComputedStyle(noteText)
-          interimMirror.style.font = style.font
-          interimMirror.style.fontSize = style.fontSize
-          interimMirror.style.fontFamily = style.fontFamily
-          interimMirror.style.lineHeight = style.lineHeight
-          interimMirror.style.padding = style.padding
-          interimMirror.style.border = style.border
-          interimMirror.style.boxSizing = style.boxSizing
-          interimMirror.style.width = noteText.offsetWidth + 'px'
-          interimMirror.style.height = noteText.offsetHeight + 'px'
-          interimMirror.style.letterSpacing = style.letterSpacing
-          interimMirror.style.whiteSpace = 'pre-wrap'
-          interimMirror.style.wordWrap = 'break-word'
-          // Get text up to caret
-          const value = noteText.value
-          const caret = noteText.selectionStart
-          const beforeCaret = value.substring(0, caret)
-          // Replace spaces and newlines for HTML rendering
-          const beforeCaretHtml = beforeCaret.replace(/\n/g, '<br>').replace(/ /g, '&nbsp;')
-          // Fill mirror with text up to caret and a marker span
-          interimMirror.innerHTML = beforeCaretHtml + '<span id="caretMarker">\u200b</span>'
-          // Get caret marker position
-          const marker = interimMirror.querySelector('#caretMarker')
-          const mirrorRect = interimMirror.getBoundingClientRect()
-          let caretLeft = 0, caretTop = 0
-          if (marker) {
-            const markerRect = marker.getBoundingClientRect()
-            caretLeft = markerRect.left - mirrorRect.left
-            caretTop = markerRect.top - mirrorRect.top
+          if (prevInterim) {
+            // Update interim in place
+            prevInterim.textContent = interimTranscript;
+          } else {
+            // Insert interim at caret
+            const sel = window.getSelection();
+            let range = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null;
+            if (range && noteText.contains(range.startContainer)) {
+              const interimSpan = document.createElement('span');
+              interimSpan.className = 'interim-span';
+              interimSpan.textContent = interimTranscript;
+              range.insertNode(interimSpan);
+              // Move caret after interim
+              range.setStartAfter(interimSpan);
+              range.collapse(true);
+              sel.removeAllRanges();
+              sel.addRange(range);
+            } else {
+              const interimSpan = document.createElement('span');
+              interimSpan.className = 'interim-span';
+              interimSpan.textContent = interimTranscript;
+              noteText.appendChild(interimSpan);
+            }
           }
-          // Show only the interim text at caret position
-          interimOverlay.style.display = "block"
-          interimOverlay.innerHTML = ''
-          const span = document.createElement('span')
-          span.style.color = '#bbb'
-          span.style.position = 'absolute'
-          span.style.left = caretLeft + 'px'
-          span.style.top = caretTop + 'px'
-          span.style.pointerEvents = 'none'
-          span.style.background = 'transparent'
-          span.style.whiteSpace = 'pre-wrap'
-          // Set max-width so that wrapping starts at left edge of textarea
-          const taWidth = noteText.offsetWidth
-          span.style.maxWidth = (taWidth - caretLeft - 16) + 'px' // 16px for padding
-          span.textContent = interimTranscript
-          interimOverlay.appendChild(span)
-          interimOverlay.scrollTop = noteText.scrollTop
-          // Remove placeholder when overlay is shown
-          if (!this._originalPlaceholder) {
-            this._originalPlaceholder = noteText.placeholder
-          }
-          noteText.placeholder = ''
-        } else {
-          interimOverlay.style.display = "none"
-          interimOverlay.innerHTML = ""
-          // Restore placeholder when overlay is hidden
-          if (this._originalPlaceholder && noteText) {
-            noteText.placeholder = this._originalPlaceholder
-          }
+        } else if (prevInterim) {
+          // Only remove interim when not speaking or on final
+          prevInterim.remove();
         }
       }
 
       if (finalTranscript) {
         setTimeout(() => {
           const noteText = document.getElementById("noteText")
-          const interimOverlay = document.getElementById("interimOverlay")
           if (noteText) {
-            // Insert at caret position, add space if needed
-            const start = noteText.selectionStart
-            const end = noteText.selectionEnd
-            const value = noteText.value
-            const before = value.substring(0, start)
-            const after = value.substring(end)
-            let insertText = finalTranscript
-            // Add space if not at start, not after a space, and not after a newline
-            if (
-              before.length > 0 &&
-              !/\s$/.test(before) &&
-              !/\n$/.test(before)
-            ) {
-              insertText = ' ' + insertText
+            // Replace interim with final bold span
+            const prevInterim = noteText.querySelector('.interim-span');
+            if (prevInterim) {
+              const finalSpan = document.createElement('span');
+              finalSpan.className = 'final-span';
+              finalSpan.textContent = prevInterim.textContent;
+              prevInterim.replaceWith(finalSpan);
+            } else {
+              // If no interim, just insert at caret
+              const sel = window.getSelection();
+              let range = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null;
+              if (range && noteText.contains(range.startContainer)) {
+                const finalSpan = document.createElement('span');
+                finalSpan.className = 'final-span';
+                finalSpan.textContent = finalTranscript;
+                range.insertNode(finalSpan);
+                // Move caret after final
+                range.setStartAfter(finalSpan);
+                range.collapse(true);
+                sel.removeAllRanges();
+                sel.addRange(range);
+              } else {
+                const finalSpan = document.createElement('span');
+                finalSpan.className = 'final-span';
+                finalSpan.textContent = finalTranscript;
+                noteText.appendChild(finalSpan);
+              }
             }
-            noteText.value = before + insertText + after
-            // Move caret to after inserted text
-            const caret = before.length + insertText.length
-            noteText.selectionStart = noteText.selectionEnd = caret
-            noteText.focus()
           }
-          // Clear interim overlay
-          if (interimOverlay) {
-            interimOverlay.style.display = "none"
-            interimOverlay.innerHTML = ""
-          }
-          // Clear interim display
-          const status = document.getElementById("dictationStatus")
-          if (status) {
-            status.querySelector("span").textContent = `Listening...`
-          }
-          this._dictationInterim = ""
-        }, 1)
+        }, 1000);
       }
     }
 
