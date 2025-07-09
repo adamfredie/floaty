@@ -90,7 +90,7 @@
         <div style="position: relative;">
           <div id="interimMirror" style="visibility: hidden; position: absolute; left: -9999px; top: 0; white-space: pre-wrap; word-wrap: break-word;"></div>
           <div id="interimOverlay" style="pointer-events: none; position: absolute; left: 0; top: 0; width: 100%; height: 100%; color: #bbb; font-size: 15px; line-height: 1.5; padding: 8px 12px; white-space: pre-wrap; z-index: 2; user-select: none; display: none;"></div>
-          <div id="noteText" class="note-textarea" contenteditable="true" data-placeholder="Write your note here... Press Ctrl+Shift+D for dictation. Press Ctrl+Shift+N to focus here. AI will auto-generate title and extract tasks" style="min-height: 120px; outline: none;"></div>
+          <textarea id="noteText" class="note-textarea" placeholder="Write your note here... Press Ctrl+Shift+D for dictation. Press Ctrl+Shift+N to focus here. AI will auto-generate title and extract tasks" rows="8"></textarea>
           <!-- Mic button and red dot inside textarea container -->
           <div style="position: absolute; bottom: 12px; right: 12px; display: flex; flex-direction: column; align-items: center; z-index: 3;">
             <button id="voiceDictationBtn" class="voice-control-btn" title="Voice Dictation" style="position: relative;">
