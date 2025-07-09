@@ -3,15 +3,15 @@
   "name": "Floaty - Smart Notes & Tasks",
   "version": "2.0.0",
   "description": "A productivity extension with AI-powered note-taking, speech recognition, and task management.",
-
-"permissions": [
-  "storage",
-  "notifications",
-  "activeTab",
-  "scripting",
-  "clipboardWrite",
-  "tabs"
-],
+  
+  "permissions": [
+    "storage",
+    "notifications",
+    "activeTab",
+    "scripting",
+    "clipboardWrite",
+    "tabs"
+  ],
 
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'"
@@ -57,6 +57,9 @@
       },
       "description": "Search notes and saved items"
     }
-  }
-
+  },
+  
+  "host_permissions": [
+    "<all_urls>"
+  ]
 }
