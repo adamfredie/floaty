@@ -20,6 +20,7 @@ class FloatyContentScript {
     // Always set up event listeners first
     this.setupEventListeners()
     this.setupHotkeys()
+    this.setupMessageListener()
     
     // Check if extension context is valid for background communication
     if (this.isExtensionContextValid()) {
@@ -145,17 +146,65 @@ class FloatyContentScript {
   setupHotkeys() {
     // Listen for hotkeys from background script
     document.addEventListener('keydown', (e) => {
-      // Ctrl+Shift+D for speech-to-text
-      if (e.ctrlKey && e.shiftKey && e.key === 'D') {
+      // Ctrl/Cmd+Shift+D for speech-to-text
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'D') {
         e.preventDefault()
         this.activateSpeechToText()
       }
       
-      // Ctrl+Shift+N for note-taking
-      if (e.ctrlKey && e.shiftKey && e.key === 'N') {
+      // Ctrl/Cmd+Shift+N for note-taking
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'N') {
         e.preventDefault()
         this.activateNoteTaking()
       }
+    })
+  }
+
+  setupMessageListener() {
+    if (!this.isExtensionContextValid()) {
+      console.warn('Floaty: Cannot setup message listener - extension context invalid')
+      return
+    }
+
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      console.log('Floaty: Received message:', message.action)
+      
+      switch (message.action) {
+        case 'toggleDictationHotkey':
+          this.activateSpeechToText()
+          sendResponse({ success: true })
+          break
+          
+        case 'quickNoteHotkey':
+          this.activateNoteTaking()
+          sendResponse({ success: true })
+          break
+          
+        case 'readAloudHotkey':
+          // Read selected text aloud
+          const selection = window.getSelection()
+          const text = selection.toString().trim()
+          if (text) {
+            this.readTextAloud(text)
+          } else {
+            this.showNotification('No text selected to read aloud', 'warning')
+          }
+          sendResponse({ success: true })
+          break
+          
+        case 'searchNotesHotkey':
+          // Open extension popup to search
+          chrome.runtime.sendMessage({ action: 'openPopup' }).catch(() => {
+            // Popup might not be available, ignore error
+          })
+          sendResponse({ success: true })
+          break
+          
+        default:
+          sendResponse({ success: false, error: 'Unknown action' })
+      }
+      
+      return true // Keep message channel open for async response
     })
   }
 
@@ -897,6 +946,34 @@ class FloatyContentScript {
   activateNoteTaking() {
     chrome.runtime.sendMessage({ action: 'focusNote' })
     this.showNotification('📝 Note-taking activated', 'info')
+  }
+
+  readTextAloud(text) {
+    if ('speechSynthesis' in window) {
+      // Stop any existing speech
+      window.speechSynthesis.cancel()
+      
+      const utterance = new SpeechSynthesisUtterance(text)
+      utterance.rate = 0.9
+      utterance.pitch = 1
+      utterance.volume = 1
+      
+      utterance.onstart = () => {
+        this.showNotification('Reading text aloud...', 'info')
+      }
+      
+      utterance.onend = () => {
+        this.showNotification('Finished reading', 'success')
+      }
+      
+      utterance.onerror = (event) => {
+        this.showNotification('Error reading text: ' + event.error, 'error')
+      }
+      
+      window.speechSynthesis.speak(utterance)
+    } else {
+      this.showNotification('Text-to-speech not supported in this browser', 'error')
+    }
   }
 
   showNotification(message, type = 'info') {

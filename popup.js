@@ -642,8 +642,8 @@ class FloatyExtension {
         return
       }
 
-      // Shortcuts that require Ctrl+Shift
-      if (e.ctrlKey && e.shiftKey) {
+      // Shortcuts that require Ctrl/Cmd+Shift
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey) {
         switch (e.key.toLowerCase()) {
           case 'f':
             e.preventDefault()

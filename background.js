@@ -144,6 +144,15 @@ class FloatyBackground {
         return true
       }
 
+      if (message.action === 'openPopup') {
+        // Try to open the extension popup
+        chrome.action.openPopup().catch(() => {
+          // Popup might not be available, ignore error
+        })
+        sendResponse({ success: true })
+        return true
+      }
+
       if (message.action === "loadData") {
         chrome.storage.local.get({ notes: [], highlights: [], tasks: [] }, (result) => {
           // Convert notes to the expected format
