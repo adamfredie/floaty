@@ -1498,7 +1498,7 @@ class FloatyExtension {
                         ${note.context ? note.context + ' • ' : ''}${this.formatDate(note.timestamp)}
                     </div>
                     <div style="font-size: 13px; color: var(--text-secondary); line-height: 1.4;">
-                        ${this.truncateText(note.content, 100)}
+                        ${this.truncateText(note.content, 90)}
                     </div>
                 </div>
                 <div style="margin-top: 12px; display: flex; gap: 8px;">
@@ -1643,7 +1643,7 @@ class FloatyExtension {
                 <span>${this.formatDate(item.savedAt)}</span>
                 ${item.url ? `<span style='display: flex; align-items: center; gap: 3px;'><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg><span class="note-url" style="cursor: pointer; text-decoration: underline; color: #0ea5e9;" title="${item.url}">${this.getDomainFromUrl(item.url)}</span></span>` : ''}
               </div>
-              <div style="background: var(--bg-tertiary); border-radius: 12px; padding: 18px 16px 16px 16px; color: var(--text-primary); font-size: 14.5px; line-height: 1.7; margin-bottom: 12px; word-break: break-word;">${item.content}</div>
+              <div style="background: var(--bg-tertiary); border-radius: 12px; padding: 18px 16px 16px 16px; color: var(--text-primary); font-size: 14.5px; line-height: 1.7; margin-bottom: 12px; word-break: break-word;">${this.truncateText(item.content, 90)}</div>
               ${item.summary ? `<div style="margin-top: 10px; padding: 12px 14px; background: linear-gradient(135deg, #6366f1 0%, #3b82f6 100%); color: #fff; border-radius: 10px; font-size: 13px; font-weight: 500;"><span style="font-size: 12px; font-weight: 600; letter-spacing: 0.01em;">AI Summary:</span><br>${item.summary}</div>` : ''}
               ${actionItemsHtml}
             </div>
@@ -1711,7 +1711,7 @@ class FloatyExtension {
                         ${item.context} • Saved ${this.formatDate(item.savedAt)}
                     </div>
                     <div style="font-size: 13px; color: var(--text-secondary); line-height: 1.4;">
-                        ${this.truncateText(item.content, 100)}
+                        ${this.truncateText(item.content, 90)}
                     </div>
                 </div>
             </div>

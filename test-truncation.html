@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Floaty AI - Truncation Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .test-case {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+        }
+        .original {
+            background: #f0f0f0;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 10px;
+        }
+        .truncated {
+            background: #e8f5e8;
+            padding: 10px;
+            border-radius: 4px;
+            border-left: 4px solid #4caf50;
+        }
+        .character-count {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Floaty AI - 90 Character Truncation Test</h1>
+    
+    <p>This test verifies that the truncation function is working correctly with 90 characters.</p>
+
+    <div class="test-case">
+        <h3>Test Case 1: Short Text (No Truncation Needed)</h3>
+        <div class="original">
+            <strong>Original:</strong> This is a short text that should not be truncated.
+        </div>
+        <div class="truncated">
+            <strong>Truncated (90 chars):</strong> <span id="test1"></span>
+        </div>
+        <div class="character-count">Character count: <span id="count1"></span></div>
+    </div>
+
+    <div class="test-case">
+        <h3>Test Case 2: Long Text (Truncation Needed)</h3>
+        <div class="original">
+            <strong>Original:</strong> This is a much longer text that should definitely be truncated because it contains more than ninety characters and needs to be cut off with an ellipsis to fit within the specified limit.
+        </div>
+        <div class="truncated">
+            <strong>Truncated (90 chars):</strong> <span id="test2"></span>
+        </div>
+        <div class="character-count">Character count: <span id="count2"></span></div>
+    </div>
+
+    <div class="test-case">
+        <h3>Test Case 3: Exactly 90 Characters</h3>
+        <div class="original">
+            <strong>Original:</strong> This text is exactly ninety characters long and should not be truncated at all.
+        </div>
+        <div class="truncated">
+            <strong>Truncated (90 chars):</strong> <span id="test3"></span>
+        </div>
+        <div class="character-count">Character count: <span id="count3"></span></div>
+    </div>
+
+    <div class="test-case">
+        <h3>Test Case 4: Very Long Text with Special Characters</h3>
+        <div class="original">
+            <strong>Original:</strong> This is an extremely long text with special characters like émojis 🎉 and symbols @#$% that should be truncated at exactly 90 characters. It contains multiple sentences and should demonstrate how the truncation function handles various types of content including punctuation marks and spaces.
+        </div>
+        <div class="truncated">
+            <strong>Truncated (90 chars):</strong> <span id="test4"></span>
+        </div>
+        <div class="character-count">Character count: <span id="count4"></span></div>
+    </div>
+
+    <script>
+        // Copy the truncateText function from popup.js
+        function truncateText(text, maxLength) {
+            return text.length > maxLength ? text.substring(0, maxLength) + "..." : text;
+        }
+
+        // Test cases
+        const testCases = [
+            "This is a short text that should not be truncated.",
+            "This is a much longer text that should definitely be truncated because it contains more than ninety characters and needs to be cut off with an ellipsis to fit within the specified limit.",
+            "This text is exactly ninety characters long and should not be truncated at all.",
+            "This is an extremely long text with special characters like émojis 🎉 and symbols @#$% that should be truncated at exactly 90 characters. It contains multiple sentences and should demonstrate how the truncation function handles various types of content including punctuation marks and spaces."
+        ];
+
+        // Run tests
+        testCases.forEach((text, index) => {
+            const truncated = truncateText(text, 90);
+            const count = truncated.length;
+            
+            document.getElementById(`test${index + 1}`).textContent = truncated;
+            document.getElementById(`count${index + 1}`).textContent = count;
+        });
+
+        console.log('Truncation test completed. Check the results above.');
+    </script>
+</body>
+</html> 
