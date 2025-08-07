@@ -1,8 +1,8 @@
 // GeminiAIService for AI-powered title, summary, and action item extraction
 class GeminiAIService {
   constructor() {
-    // Backend API URL - replace with your Vercel deployment URL
-    this.baseUrl = "https://your-vercel-deployment.vercel.app/api"
+    // Backend API URL - Vercel deployment
+    this.baseUrl = "https://floaty-hyax9pwiv-arrythmias-projects.vercel.app/api"
   }
 
   async generateTitle(text, context = "") {
