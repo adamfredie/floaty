@@ -1,35 +1,18 @@
 // GeminiAIService for AI-powered title, summary, and action item extraction
 class GeminiAIService {
   constructor() {
-    this.apiKey = "AIzaSyDCV74Ius71fdKhB6_YiXeUGCII8ak_3Wg" // Add your Gemini API key here: https://makersuite.google.com/app/apikey
-    this.baseUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent"
+    // Backend API URL - replace with your Vercel deployment URL
+    this.baseUrl = "https://your-vercel-deployment.vercel.app/api"
   }
 
   async generateTitle(text, context = "") {
     try {
-      if (!this.apiKey || this.apiKey.trim() === "") {
-        console.log("No Gemini API key set, using fallback title");
-        return this.fallbackTitle(text, context);
-      }
-      
-      const prompt = `Generate a concise, descriptive title (max 50 characters) for this note${context ? ` in the context of \"${context}\"` : ""}:\n\n${text}`
-
-      const response = await fetch(`${this.baseUrl}?key=${this.apiKey}`, {
+      const response = await fetch(`${this.baseUrl}/generate-title`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                {
-                  text: prompt,
-                },
-              ],
-            },
-          ],
-        }),
+        body: JSON.stringify({ text, context })
       })
 
       if (!response.ok) {
@@ -37,7 +20,7 @@ class GeminiAIService {
       }
 
       const data = await response.json()
-      const title = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "Untitled Note"
+      const title = data.title || "Untitled Note"
 
       return title.length > 50 ? title.substring(0, 47) + "..." : title
     } catch (error) {
@@ -48,29 +31,12 @@ class GeminiAIService {
 
   async generateSummary(text) {
     try {
-      if (!this.apiKey || this.apiKey.trim() === "") {
-        console.log("No Gemini API key set, using fallback summary");
-        return this.fallbackSummary(text);
-      }
-      
-      const prompt = `Provide a concise summary (2-3 sentences) of the following text, highlighting the key points and main takeaways. Focus on the most important information:\n\n${text}`
-
-      const response = await fetch(`${this.baseUrl}?key=${this.apiKey}`, {
+      const response = await fetch(`${this.baseUrl}/generate-summary`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                {
-                  text: prompt,
-                },
-              ],
-            },
-          ],
-        }),
+        body: JSON.stringify({ text })
       })
 
       if (!response.ok) {
@@ -78,7 +44,7 @@ class GeminiAIService {
       }
 
       const data = await response.json()
-      return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "Unable to generate summary."
+      return data.summary || "Unable to generate summary."
     } catch (error) {
       console.log("Using fallback summary generation")
       return this.fallbackSummary(text)
@@ -87,29 +53,12 @@ class GeminiAIService {
 
   async extractActionItems(text, context = "") {
     try {
-      if (!this.apiKey || this.apiKey.trim() === "") {
-        console.log("No Gemini API key set, using fallback action items");
-        return this.fallbackActionItems(text);
-      }
-      
-      const prompt = `Extract action items, tasks, or to-dos from the following text${context ? ` (context: ${context})` : ""}. Return only the action items, one per line, without numbering or bullet points. Focus on actionable items that require follow-up:\n\n${text}`
-
-      const response = await fetch(`${this.baseUrl}?key=${this.apiKey}`, {
+      const response = await fetch(`${this.baseUrl}/extract-tasks`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                {
-                  text: prompt,
-                },
-              ],
-            },
-          ],
-        }),
+        body: JSON.stringify({ text, context })
       })
 
       if (!response.ok) {
@@ -117,14 +66,7 @@ class GeminiAIService {
       }
 
       const data = await response.json()
-      const result = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || ""
-
-      // Clean up the result - remove bullet points, numbers, and empty lines
-      return result
-        .split("\n")
-        .map((item) => item.trim().replace(/^[-*•\d\.\s]+/, '').trim())
-        .filter((item) => item.length > 0 && item.length < 100)
-        .slice(0, 5)
+      return data.tasks || []
     } catch (error) {
       console.log("Using fallback action item extraction")
       return this.fallbackActionItems(text)
