@@ -35,6 +35,12 @@ class FloatyContentScript {
       console.warn('Floaty: Extension context not available - background features disabled')
     }
     
+    // Restore highlights for this page
+    this.restoreHighlights()
+    
+    // Clean up old highlights
+    this.cleanupOldHighlights()
+    
     console.log('Floaty content script initialized')
   }
 
@@ -105,14 +111,32 @@ class FloatyContentScript {
   }
 
   setupEventListeners() {
-    // Text selection events
+    // Listen for text selection
     document.addEventListener('mouseup', (e) => this.handleTextSelection(e))
     document.addEventListener('keyup', (e) => this.handleTextSelection(e))
     
-    // Hide popup when clicking outside
+    // Listen for clicks outside to hide popup
     document.addEventListener('click', (e) => {
-      if (this.popup && !this.popup.contains(e.target)) {
+      if (!e.target.closest('#floaty-popup')) {
         this.hidePopup()
+      }
+    })
+    
+    // Right-click context menu for highlights
+    document.addEventListener('contextmenu', (e) => {
+      const highlightElement = e.target.closest('.floaty-highlight')
+      if (highlightElement) {
+        e.preventDefault()
+        e.stopPropagation()
+        this.showHighlightContextMenu(e, highlightElement)
+      }
+    })
+    
+    // Hide context menu when clicking elsewhere
+    document.addEventListener('click', (e) => {
+      const contextMenu = document.getElementById('floaty-context-menu')
+      if (contextMenu && !contextMenu.contains(e.target)) {
+        contextMenu.remove()
       }
     })
 
@@ -197,6 +221,16 @@ class FloatyContentScript {
           chrome.runtime.sendMessage({ action: 'openPopup' }).catch(() => {
             // Popup might not be available, ignore error
           })
+          sendResponse({ success: true })
+          break
+          
+        case 'clearAllPageHighlights':
+          this.clearAllPageHighlights()
+          sendResponse({ success: true })
+          break
+          
+        case 'removeSpecificHighlight':
+          this.removeSpecificHighlight(message.content)
           sendResponse({ success: true })
           break
           
@@ -358,39 +392,31 @@ class FloatyContentScript {
       span.style.padding = '2px 0'
       span.className = 'floaty-highlight'
       
-      // Handle complex DOM structures (like Wikipedia links)
+      // Store highlight position for persistence
+      const highlightId = 'floaty-highlight-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9)
+      span.setAttribute('data-floaty-highlight-id', highlightId)
+      
+      // Get position information for persistence
+      const position = this.getHighlightPosition(this.selectedRange)
+      
+      // Handle complex DOM structures (like Wikipedia links) - FIXED for duplication
       const range = this.selectedRange.cloneRange()
-      const contents = range.extractContents()
       
-      // Preserve existing links and formatting
-      const fragment = document.createDocumentFragment()
-      const walker = document.createTreeWalker(
-        contents,
-        NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT,
-        null,
-        false
-      )
+      // Check if the range contains complex elements (like links)
+      const hasComplexElements = this.hasComplexElements(range)
       
-      let node
-      while (node = walker.nextNode()) {
-        if (node.nodeType === Node.TEXT_NODE) {
-          // Wrap text nodes in highlight span
-          const textSpan = span.cloneNode(true)
-          textSpan.textContent = node.textContent
-          fragment.appendChild(textSpan)
-        } else if (node.nodeType === Node.ELEMENT_NODE) {
-          // Preserve existing elements (links, etc.) but add highlight styling
-          const element = node.cloneNode(true)
-          element.style.backgroundColor = '#fff3cd'
-          element.style.borderBottom = '2px solid #ffc107'
-          element.style.padding = '2px 0'
-          element.classList.add('floaty-highlight')
-          fragment.appendChild(element)
-        }
+      if (hasComplexElements) {
+        // For complex elements, use a simpler approach to avoid duplication
+        this.highlightComplexRange(range, span, highlightId)
+      } else {
+        // For simple text, use the original approach
+        const contents = range.extractContents()
+        span.appendChild(contents)
+        range.insertNode(span)
       }
       
-      // Insert the highlighted content back
-      range.insertNode(fragment)
+      // Store the highlight position for persistence
+      this.storeHighlightPosition(highlightId, position, this.selectedText)
       
       // Save the highlight to storage
       this.saveHighlight()
@@ -408,6 +434,12 @@ class FloatyContentScript {
         span.style.padding = '2px 0'
         span.className = 'floaty-highlight'
         
+        const highlightId = 'floaty-highlight-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9)
+        span.setAttribute('data-floaty-highlight-id', highlightId)
+        
+        const position = this.getHighlightPosition(this.selectedRange)
+        this.storeHighlightPosition(highlightId, position, this.selectedText)
+        
         this.selectedRange.surroundContents(span)
         
         // Save the highlight to storage
@@ -421,6 +453,163 @@ class FloatyContentScript {
         this.showNotification('Failed to highlight text. Selection may be too complex.', 'error')
       }
     }
+  }
+
+  // Check if range contains complex elements like links
+  hasComplexElements(range) {
+    const fragment = range.cloneContents()
+    const walker = document.createTreeWalker(
+      fragment,
+      NodeFilter.SHOW_ELEMENT,
+      null,
+      false
+    )
+    
+    let node
+    while (node = walker.nextNode()) {
+      if (node.tagName === 'A' || node.tagName === 'LINK' || node.children.length > 0) {
+        return true
+      }
+    }
+    return false
+  }
+
+  // Highlight complex ranges without duplication
+  highlightComplexRange(range, span, highlightId) {
+    const startContainer = range.startContainer
+    const endContainer = range.endContainer
+    const startOffset = range.startOffset
+    const endOffset = range.endOffset
+    
+    // If it's a simple text node, handle it directly
+    if (startContainer === endContainer && startContainer.nodeType === Node.TEXT_NODE) {
+      const text = startContainer.textContent
+      const beforeText = text.substring(0, startOffset)
+      const selectedText = text.substring(startOffset, endOffset)
+      const afterText = text.substring(endOffset)
+      
+      // Create text nodes
+      const beforeNode = document.createTextNode(beforeText)
+      const selectedNode = document.createTextNode(selectedText)
+      const afterNode = document.createTextNode(afterText)
+      
+      // Clear the original text
+      startContainer.textContent = ''
+      
+      // Insert the parts
+      startContainer.parentNode.insertBefore(beforeNode, startContainer)
+      span.appendChild(selectedNode)
+      startContainer.parentNode.insertBefore(span, startContainer)
+      startContainer.parentNode.insertBefore(afterNode, startContainer)
+      
+      // Remove the empty text node
+      if (startContainer.textContent === '') {
+        startContainer.parentNode.removeChild(startContainer)
+      }
+    } else {
+      // For complex cases, use a more careful approach
+      const contents = range.extractContents()
+      span.appendChild(contents)
+      range.insertNode(span)
+    }
+  }
+
+  // Get highlight position information for persistence
+  getHighlightPosition(range) {
+    const startContainer = range.startContainer
+    const endContainer = range.endContainer
+    const startOffset = range.startOffset
+    const endOffset = range.endOffset
+    
+    return {
+      startContainer: this.getNodePath(startContainer),
+      endContainer: this.getNodePath(endContainer),
+      startOffset: startOffset,
+      endOffset: endOffset,
+      text: range.toString(),
+      url: this.currentUrl,
+      timestamp: Date.now()
+    }
+  }
+
+  // Get a path to a node for persistence
+  getNodePath(node) {
+    const path = []
+    let current = node
+    
+    while (current && current !== document.body) {
+      let index = 0
+      let sibling = current.previousSibling
+      
+      while (sibling) {
+        if (sibling.nodeType === current.nodeType) {
+          index++
+        }
+        sibling = sibling.previousSibling
+      }
+      
+      path.unshift({
+        nodeType: current.nodeType,
+        nodeName: current.nodeName,
+        index: index
+      })
+      
+      current = current.parentNode
+    }
+    
+    return path
+  }
+
+  // Store highlight position in Chrome storage
+  storeHighlightPosition(highlightId, position, text) {
+    chrome.storage.local.get(['floatyHighlights'], (result) => {
+      const highlights = result.floatyHighlights || {}
+      highlights[highlightId] = {
+        position: position,
+        text: text,
+        url: this.currentUrl,
+        timestamp: Date.now()
+      }
+      
+      chrome.storage.local.set({ floatyHighlights: highlights }, () => {
+        console.log('Floaty: Highlight position stored for persistence')
+      })
+    })
+  }
+
+  // Remove highlight from storage
+  removeHighlightFromStorage(highlightId) {
+    chrome.storage.local.get(['floatyHighlights'], (result) => {
+      const highlights = result.floatyHighlights || {}
+      delete highlights[highlightId]
+      
+      chrome.storage.local.set({ floatyHighlights: highlights }, () => {
+        console.log('Floaty: Highlight removed from storage')
+      })
+    })
+  }
+
+  // Clean up old highlights (older than 30 days)
+  cleanupOldHighlights() {
+    const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000)
+    
+    chrome.storage.local.get(['floatyHighlights'], (result) => {
+      const highlights = result.floatyHighlights || {}
+      let hasChanges = false
+      
+      for (const highlightId in highlights) {
+        if (highlights[highlightId].timestamp < thirtyDaysAgo) {
+          delete highlights[highlightId]
+          hasChanges = true
+        }
+      }
+      
+      if (hasChanges) {
+        chrome.storage.local.set({ floatyHighlights: highlights }, () => {
+          console.log('Floaty: Cleaned up old highlights')
+        })
+      }
+    })
   }
 
   addPopupStyles() {
@@ -572,48 +761,29 @@ class FloatyContentScript {
         return;
       }
       
-      // Always extract tasks, but always save
+      // Save as plain note without extracting tasks
       chrome.runtime.sendMessage({
-        action: 'detectTasks',
+        action: 'saveSelectedText',
         text: this.selectedText,
         url: this.currentUrl,
         title: this.currentPageTitle,
-        context: ''
-      }, (taskResponse) => {
+        context: '',
+        tasks: [] // Empty array - no tasks
+      }, (saveResponse) => {
         if (chrome.runtime.lastError) {
-          console.error('Floaty: Runtime error detecting tasks:', chrome.runtime.lastError);
-          this.showNotification('Failed to detect tasks: ' + chrome.runtime.lastError.message, 'error');
+          console.error('Floaty: Runtime error saving text:', chrome.runtime.lastError);
+          this.showNotification('Failed to save text: ' + chrome.runtime.lastError.message, 'error');
           return;
         }
         
-        // Ensure tasks are objects with a 'text' property
-        const tasks = (taskResponse && taskResponse.success && Array.isArray(taskResponse.tasks))
-          ? taskResponse.tasks.map(t => typeof t === 'string' ? { text: t } : t)
-          : [];
-        
-        // Always save, with or without tasks
-        chrome.runtime.sendMessage({
-          action: 'saveSelectedText',
-          text: this.selectedText,
-          url: this.currentUrl,
-          title: this.currentPageTitle,
-          context: '',
-          tasks: tasks
-        }, (saveResponse) => {
-          if (chrome.runtime.lastError) {
-            console.error('Floaty: Runtime error saving text:', chrome.runtime.lastError);
-            this.showNotification('Failed to save text: ' + chrome.runtime.lastError.message, 'error');
-            return;
-          }
-          
-          if (saveResponse && saveResponse.success) {
-            this.showNotification('Text saved successfully!', 'success');
-          } else {
-            this.showNotification('Failed to save text', 'error');
-          }
-        });
-        this.hidePopup();
+        if (saveResponse && saveResponse.success) {
+          this.showNotification('Text saved successfully!', 'success');
+        } else {
+          this.showNotification('Failed to save text', 'error');
+        }
       });
+      
+      this.hidePopup();
     } catch (error) {
       console.error('Floaty: Error in saveToNotes:', error);
       this.showNotification('Failed to save: ' + error.message, 'error');
@@ -848,15 +1018,17 @@ class FloatyContentScript {
           border-radius: 6px;
           font-size: 14px;
           cursor: pointer;
+          line-height: 1;
         ">Cancel</button>
         <button id="floaty-add-selected-tasks" style="
           padding: 8px 16px;
-          background: #3b82f6;
+          background: #000;
           color: white;
           border: none;
           border-radius: 6px;
           font-size: 14px;
           cursor: pointer;
+          line-height: 1;
         ">Add Selected Tasks</button>
       </div>
       
@@ -1024,6 +1196,373 @@ class FloatyContentScript {
       }, 300)
     }, 2000)
   }
+
+  async restoreHighlights() {
+    if (!this.isExtensionContextValid()) {
+      console.warn('Floaty: Cannot restore highlights - extension context invalid');
+      return;
+    }
+
+    chrome.storage.local.get(['floatyHighlights'], (result) => {
+      const highlights = result.floatyHighlights || {};
+      const currentUrl = window.location.href;
+
+      for (const highlightId in highlights) {
+        const highlight = highlights[highlightId];
+        if (highlight.url === currentUrl) {
+          this.restoreHighlight(highlight, highlightId);
+        }
+      }
+    });
+  }
+
+  async restoreHighlight(highlight, highlightId) {
+    try {
+      // Use a simpler text-based approach for restoration
+      const text = highlight.text;
+      if (!text) return;
+
+      // First try to find the text in text nodes (simple case)
+      const textNodes = this.findTextNodes(document.body, text);
+      
+      for (const textNode of textNodes) {
+        // Check if this text node is already highlighted
+        if (textNode.parentNode && textNode.parentNode.classList.contains('floaty-highlight')) {
+          continue; // Skip if already highlighted
+        }
+
+        const nodeText = textNode.textContent;
+        const textIndex = nodeText.indexOf(text);
+        
+        if (textIndex !== -1) {
+          // Create the highlight span
+          const span = document.createElement('span');
+          span.style.backgroundColor = '#fff3cd';
+          span.style.borderBottom = '2px solid #ffc107';
+          span.style.padding = '2px 0';
+          span.className = 'floaty-highlight';
+          span.setAttribute('data-floaty-highlight-id', highlightId);
+
+          // Split the text node
+          const beforeText = nodeText.substring(0, textIndex);
+          const selectedText = nodeText.substring(textIndex, textIndex + text.length);
+          const afterText = nodeText.substring(textIndex + text.length);
+
+          // Create new text nodes
+          const beforeNode = document.createTextNode(beforeText);
+          const selectedNode = document.createTextNode(selectedText);
+          const afterNode = document.createTextNode(afterText);
+
+          // Clear the original text node
+          textNode.textContent = '';
+
+          // Insert the parts
+          textNode.parentNode.insertBefore(beforeNode, textNode);
+          span.appendChild(selectedNode);
+          textNode.parentNode.insertBefore(span, textNode);
+          textNode.parentNode.insertBefore(afterNode, textNode);
+
+          // Remove the empty text node
+          if (textNode.textContent === '') {
+            textNode.parentNode.removeChild(textNode);
+          }
+
+          console.log('Floaty: Restored highlight:', text);
+          break; // Only restore the first occurrence
+        }
+      }
+
+      // If not found in text nodes, try to find in complex elements (like links)
+      const complexElements = this.findComplexElements(document.body, text);
+      
+      for (const element of complexElements) {
+        // Check if this element is already highlighted
+        if (element.classList.contains('floaty-highlight')) {
+          continue; // Skip if already highlighted
+        }
+
+        const elementText = element.textContent;
+        if (elementText.includes(text)) {
+          // For complex elements, we need to be more careful
+          // Try to highlight the specific text within the element
+          this.highlightTextInElement(element, text, highlightId);
+          console.log('Floaty: Restored complex highlight:', text);
+          break; // Only restore the first occurrence
+        }
+      }
+    } catch (error) {
+      console.error('Floaty: Failed to restore highlight:', error);
+    }
+  }
+
+  // Find all text nodes in the document
+  findTextNodes(element, searchText) {
+    const textNodes = [];
+    const walker = document.createTreeWalker(
+      element,
+      NodeFilter.SHOW_TEXT,
+      null,
+      false
+    );
+
+    let node;
+    while (node = walker.nextNode()) {
+      if (node.textContent.includes(searchText)) {
+        textNodes.push(node);
+      }
+    }
+
+    return textNodes;
+  }
+
+  // Find complex elements containing the text
+  findComplexElements(element, searchText) {
+    const elements = [];
+    const walker = document.createTreeWalker(
+      element,
+      NodeFilter.SHOW_ELEMENT,
+      null,
+      false
+    );
+
+    let node;
+    while (node = walker.nextNode()) {
+      if (node.textContent.includes(searchText) && 
+          (node.tagName === 'A' || node.tagName === 'LINK' || node.children.length > 0)) {
+        elements.push(node);
+      }
+    }
+
+    return elements;
+  }
+
+  // Highlight text within a complex element
+  highlightTextInElement(element, text, highlightId) {
+    try {
+      // Create a range that covers the text within the element
+      const range = document.createRange();
+      const walker = document.createTreeWalker(
+        element,
+        NodeFilter.SHOW_TEXT,
+        null,
+        false
+      );
+
+      let textNode;
+      while (textNode = walker.nextNode()) {
+        const nodeText = textNode.textContent;
+        const textIndex = nodeText.indexOf(text);
+        
+        if (textIndex !== -1) {
+          range.setStart(textNode, textIndex);
+          range.setEnd(textNode, textIndex + text.length);
+          
+          // Create highlight span
+          const span = document.createElement('span');
+          span.style.backgroundColor = '#fff3cd';
+          span.style.borderBottom = '2px solid #ffc107';
+          span.style.padding = '2px 0';
+          span.className = 'floaty-highlight';
+          span.setAttribute('data-floaty-highlight-id', highlightId);
+
+          // Extract and wrap the content
+          const contents = range.extractContents();
+          span.appendChild(contents);
+          range.insertNode(span);
+          
+          return; // Successfully highlighted
+        }
+      }
+    } catch (error) {
+      console.error('Floaty: Failed to highlight text in element:', error);
+    }
+  }
+
+  // Show context menu for highlights
+  showHighlightContextMenu(event, highlightElement) {
+    // Remove existing context menu
+    const existingMenu = document.getElementById('floaty-context-menu')
+    if (existingMenu) {
+      existingMenu.remove()
+    }
+
+    // Create context menu
+    const contextMenu = document.createElement('div')
+    contextMenu.id = 'floaty-context-menu'
+    contextMenu.style.cssText = `
+      position: fixed;
+      z-index: 10001;
+      background: white;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      padding: 8px 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 14px;
+      min-width: 120px;
+    `
+
+    // Remove highlight option
+    const removeOption = document.createElement('div')
+    removeOption.style.cssText = `
+      padding: 8px 16px;
+      cursor: pointer;
+      color: #d32f2f;
+      transition: background-color 0.2s;
+    `
+    removeOption.textContent = 'Remove Highlight'
+    removeOption.addEventListener('mouseenter', () => {
+      removeOption.style.backgroundColor = '#f5f5f5'
+    })
+    removeOption.addEventListener('mouseleave', () => {
+      removeOption.style.backgroundColor = 'transparent'
+    })
+    removeOption.addEventListener('click', () => {
+      this.removeHighlight(highlightElement)
+      contextMenu.remove()
+    })
+
+    contextMenu.appendChild(removeOption)
+
+    // Position the menu
+    // Position the context menu near the highlight element
+    const highlightRect = highlightElement.getBoundingClientRect()
+    const menuX = highlightRect.right + 5
+    const menuY = highlightRect.top
+    
+    contextMenu.style.left = `${menuX}px`
+    contextMenu.style.top = `${menuY}px`
+    
+    // Add to DOM first to get dimensions
+    document.body.appendChild(contextMenu)
+    const rect = contextMenu.getBoundingClientRect()
+    
+    // Adjust if it goes off-screen
+    if (rect.right > window.innerWidth) {
+      contextMenu.style.left = `${highlightRect.left - rect.width - 5}px`
+    }
+    
+    if (rect.bottom > window.innerHeight) {
+      contextMenu.style.top = `${highlightRect.bottom - rect.height}px`
+    }
+
+    document.body.appendChild(contextMenu)
+  }
+
+  // Remove highlight from DOM and storage
+  removeHighlight(highlightElement) {
+    try {
+      const highlightId = highlightElement.getAttribute('data-floaty-highlight-id')
+      
+      // Remove from storage
+      if (highlightId) {
+        this.removeHighlightFromStorage(highlightId)
+      }
+
+      // Remove from DOM
+      const parent = highlightElement.parentNode
+      while (highlightElement.firstChild) {
+        parent.insertBefore(highlightElement.firstChild, highlightElement)
+      }
+      parent.removeChild(highlightElement)
+
+      // Merge adjacent text nodes
+      this.mergeAdjacentTextNodes(parent)
+
+      console.log('Floaty: Highlight removed')
+      this.showNotification('Highlight removed', 'success')
+    } catch (error) {
+      console.error('Floaty: Failed to remove highlight:', error)
+      this.showNotification('Failed to remove highlight', 'error')
+    }
+  }
+
+  // Merge adjacent text nodes
+  mergeAdjacentTextNodes(element) {
+    const walker = document.createTreeWalker(
+      element,
+      NodeFilter.SHOW_TEXT,
+      null,
+      false
+    )
+
+    let previousNode = null
+    let node
+    while (node = walker.nextNode()) {
+      if (previousNode && previousNode.nodeType === Node.TEXT_NODE && node.nodeType === Node.TEXT_NODE) {
+        previousNode.textContent += node.textContent
+        node.parentNode.removeChild(node)
+      } else {
+        previousNode = node
+      }
+    }
+  }
+
+  // Clear all highlights from the current page
+  clearAllPageHighlights() {
+    try {
+      // Remove all highlight elements from the page
+      const highlightElements = document.querySelectorAll('.floaty-highlight')
+      highlightElements.forEach(element => {
+        this.removeHighlight(element)
+      })
+      
+      // Clear highlights from storage for this page
+      chrome.storage.local.get(['floatyHighlights'], (result) => {
+        const highlights = result.floatyHighlights || {}
+        const currentUrl = window.location.href
+        let hasChanges = false
+        
+        for (const highlightId in highlights) {
+          if (highlights[highlightId].url === currentUrl) {
+            delete highlights[highlightId]
+            hasChanges = true
+          }
+        }
+        
+        if (hasChanges) {
+          chrome.storage.local.set({ floatyHighlights: highlights }, () => {
+            console.log('Floaty: Cleared all highlights from storage for this page')
+          })
+        }
+      })
+      
+      console.log('Floaty: Cleared all highlights from page')
+    } catch (error) {
+      console.error('Floaty: Failed to clear page highlights:', error)
+    }
+  }
+
+  // Remove specific highlight by content
+  removeSpecificHighlight(content) {
+    try {
+      // Find all highlight elements on the page
+      const highlightElements = document.querySelectorAll('.floaty-highlight')
+      
+      for (const element of highlightElements) {
+        // Check if this highlight contains the specified content
+        if (element.textContent.includes(content)) {
+          // Remove from DOM
+          this.removeHighlight(element)
+          
+          // Remove from storage
+          const highlightId = element.getAttribute('data-floaty-highlight-id')
+          if (highlightId) {
+            this.removeHighlightFromStorage(highlightId)
+          }
+          
+          console.log('Floaty: Removed specific highlight:', content)
+          return
+        }
+      }
+      
+      console.log('Floaty: Specific highlight not found on page:', content)
+    } catch (error) {
+      console.error('Floaty: Failed to remove specific highlight:', error)
+    }
+  }
+
+
 }
 
 // Initialize Floaty content script

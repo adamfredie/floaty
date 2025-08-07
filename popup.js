@@ -266,6 +266,7 @@ class FloatyExtension {
 
   init() {
     this.loadData()
+    this.loadNoteTextareaContent() // Add this line to restore note textarea content
     this.initializeDarkMode()
     this.setupEventListeners()
     this.updateDateTime()
@@ -388,6 +389,7 @@ class FloatyExtension {
     // Notes tab
     const addNoteBtn = document.getElementById("addNoteBtn")
     const clearBtn = document.getElementById("clearBtn")
+    const noteTextarea = document.getElementById("noteText")
 
     // Voice control buttons in notes tab
     const voiceDictationBtn = document.getElementById("voiceDictationBtn")
@@ -402,6 +404,13 @@ class FloatyExtension {
     if (clearBtn) {
       clearBtn.addEventListener("click", () => {
         this.clearNoteInput()
+      })
+    }
+
+    // Add event listener to save note textarea content when user types
+    if (noteTextarea) {
+      noteTextarea.addEventListener("input", () => {
+        this.saveNoteTextareaContent()
       })
     }
 
@@ -422,7 +431,7 @@ class FloatyExtension {
     // Saved tab
     const clearSavedBtn = document.getElementById("clearSavedBtn")
     const searchField = document.getElementById("searchField")
-    const generateAllSummariesBtn = document.getElementById("generateAllSummariesBtn")
+    const dictationBtn = document.getElementById("dictationBtn")
 
     if (clearSavedBtn) {
       clearSavedBtn.addEventListener("click", () => {
@@ -436,9 +445,9 @@ class FloatyExtension {
       })
     }
 
-    if (generateAllSummariesBtn) {
-      generateAllSummariesBtn.addEventListener("click", () => {
-        this.generateAllSummaries()
+    if (dictationBtn) {
+      dictationBtn.addEventListener("click", () => {
+        this.openDictationModal()
       })
     }
 
@@ -461,6 +470,7 @@ class FloatyExtension {
     // Tasks tab
     const addTaskBtn = document.getElementById("addTaskBtn")
     const taskText = document.getElementById("taskText")
+    const clearAllTasksBtn = document.getElementById("clearAllTasksBtn")
 
     if (addTaskBtn) {
       addTaskBtn.addEventListener("click", () => {
@@ -473,6 +483,12 @@ class FloatyExtension {
         if (e.key === "Enter") {
           this.addTask()
         }
+      })
+    }
+
+    if (clearAllTasksBtn) {
+      clearAllTasksBtn.addEventListener("click", () => {
+        this.clearAllTasks()
       })
     }
 
@@ -583,13 +599,33 @@ class FloatyExtension {
 
     if (closeTaskDetection) {
       closeTaskDetection.addEventListener("click", () => {
+        // Discard the pending note if user closes
+        if (this.pendingNote) {
+          this.pendingNote = null
+          this.showNotification('❌ Note creation cancelled')
+        }
         this.hideTaskDetectionDialog()
+        
+        // Clear stored note textarea content since note was cancelled
+        chrome.storage.local.remove(['noteTextareaContent'], () => {
+          console.log('[Floaty] Note textarea content cleared from storage after cancelling task dialog')
+        })
       })
     }
 
     if (cancelTaskDetection) {
       cancelTaskDetection.addEventListener("click", () => {
+        // Discard the pending note if user cancels
+        if (this.pendingNote) {
+          this.pendingNote = null
+          this.showNotification('❌ Note creation cancelled')
+        }
         this.hideTaskDetectionDialog()
+        
+        // Clear stored note textarea content since note was cancelled
+        chrome.storage.local.remove(['noteTextareaContent'], () => {
+          console.log('[Floaty] Note textarea content cleared from storage after cancelling task dialog')
+        })
       })
     }
 
@@ -618,6 +654,13 @@ class FloatyExtension {
 
   setupKeyboardShortcuts() {
     document.addEventListener("keydown", (e) => {
+      // Handle Cmd+Enter for saving notes (even in textarea)
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+        e.preventDefault()
+        this.addNote()
+        return
+      }
+
       // Don't trigger shortcuts if user is typing in an input or textarea
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
         // Allow Escape key in inputs
@@ -1094,8 +1137,8 @@ class FloatyExtension {
 
     container.innerHTML = results
       .map(
-        (result) => `
-          <div class="search-result-item" onclick="floatyApp.openSearchResult('${result.type}', ${result.index})">
+        (result, index) => `
+          <div class="search-result-item" data-type="${result.type}" data-index="${result.index}">
             ${this.getTypeIcon(result.type)}
             <div class="search-result-title">${result.title}</div>
             ${result.context ? `<div class="search-result-context">${result.context}</div>` : ''}
@@ -1103,6 +1146,17 @@ class FloatyExtension {
         `
       )
       .join("")
+
+    // Add event listeners using event delegation
+    container.addEventListener('click', (e) => {
+      const searchResultItem = e.target.closest('.search-result-item')
+      if (!searchResultItem) return
+      
+      const type = searchResultItem.dataset.type
+      const index = parseInt(searchResultItem.dataset.index)
+      
+      this.openSearchResult(type, index)
+    })
   }
 
   getTypeIcon(type) {
@@ -1311,29 +1365,54 @@ class FloatyExtension {
       pageTitle: currentTitle
     };
     
+    // If AI Extract tasks is checked and tasks were found, show dialog first
+    if (extractTasks && extractTasks.checked && actionItems.length > 0) {
+      // Store the note temporarily
+      this.pendingNote = note
+      
+      // Convert to task objects for the dialog
+      const tasks = actionItems.map(item => ({ text: item.text || item, context, priority: 'medium' }))
+      this.showTaskDetectionDialog(tasks)
+      
+      // Clear inputs immediately
+      noteTextArea.value = ""
+      if (contextField) contextField.value = ""
+      
+      // Clear stored note textarea content
+      chrome.storage.local.remove(['noteTextareaContent'], () => {
+        console.log('[Floaty] Note textarea content cleared from storage after showing task dialog')
+      })
+      
+      return // Don't save the note yet
+    }
+    
+    // If no AI extraction or no tasks found, save immediately
+    console.log('[Floaty] Saving note immediately')
+    this.saveNoteToStorage(note)
+    
+    // Clear inputs
+    noteTextArea.value = ""
+    if (contextField) contextField.value = ""
+    
+    // Clear stored note textarea content
+    chrome.storage.local.remove(['noteTextareaContent'], () => {
+      console.log('[Floaty] Note textarea content cleared from storage after saving note')
+    })
+  }
+
+  saveNoteToStorage(note) {
     console.log('[Floaty] Saving note with action items:', note.actionItems)
     
-    // Add to saved items only (not to both notes and savedItems)
+    // Add to saved items
     this.savedItems.unshift(note);
     this.saveData()
     this.renderSavedItems()
     
     // Show notification
-    if (actionItems.length > 0) {
-      this.showNotification(`✅ Note saved with ${actionItems.length} action item${actionItems.length > 1 ? 's' : ''}`)
+    if (note.actionItems && note.actionItems.length > 0) {
+      this.showNotification(`✅ Note saved with ${note.actionItems.length} action item${note.actionItems.length > 1 ? 's' : ''}`)
     } else {
       this.showNotification('✅ Note saved successfully')
-    }
-
-    // Clear inputs
-    noteTextArea.value = ""
-    if (contextField) contextField.value = ""
-
-    // Only show task detection dialog if tasks were found AND user wants to add them to global tasks
-    if (actionItems.length > 0 && extractTasks && extractTasks.checked) {
-      // Convert to task objects for the dialog
-      const tasks = actionItems.map(item => ({ text: item.text || item, context, priority: 'medium' }))
-      this.showTaskDetectionDialog(tasks)
     }
   }
 
@@ -1474,6 +1553,11 @@ class FloatyExtension {
 
     if (noteText) noteText.value = ""
     if (contextField) contextField.value = ""
+    
+    // Clear stored note textarea content
+    chrome.storage.local.remove(['noteTextareaContent'], () => {
+      console.log('[Floaty] Note textarea content cleared from storage')
+    })
   }
 
   renderNotes() {
@@ -1560,6 +1644,8 @@ class FloatyExtension {
     }
 
     container.innerHTML = this.highlights
+      .slice()
+      .reverse()
       .map(
         (highlight) => `
             <div class="highlight-item" data-id="${highlight.id}" style="margin-bottom: 28px;">
@@ -1579,7 +1665,7 @@ class FloatyExtension {
                             <span class="highlight-url" style="cursor: pointer; text-decoration: underline; color: #0ea5e9;" title="${highlight.url}">${this.getDomainFromUrl(highlight.url)}</span>
                         </div>
                     ` : ''}
-                    <div style="font-size: 13px; color: var(--text-secondary); line-height: 1.4; background: #fff3cd; padding: 8px; border-radius: 6px; border-left: 3px solid #ffc107;">
+                    <div class="highlight-content-preview" style="font-size: 13px; color: var(--text-secondary); line-height: 1.4; background: #fff3cd; padding: 8px; border-radius: 6px; border-left: 3px solid #ffc107;">
                         ${this.truncateText(highlight.content, 150)}
                     </div>
                 </div>
@@ -1630,54 +1716,61 @@ class FloatyExtension {
 
     // Generate HTML for each saved item
     const htmlContent = this.savedItems
+      .slice()
+      .reverse()
       .map(
-        (item) => {
-          // Action items should only be shown in the modal, not in the preview
-          const actionItemsHtml = '';
-
-          return `
-            <div class="saved-note-clean" data-id="${item.id}" style="background: var(--bg-primary); border-radius: 18px; padding: 24px 28px 20px 28px; margin-bottom: 28px; border: 1px solid var(--border-color); box-shadow: none;">
-              <div style="font-size: 1.22rem; font-weight: 700; color: var(--text-primary); margin-bottom: 6px; letter-spacing: 0.01em;">${item.title}</div>
-              <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; font-size: 12.5px; color: var(--text-muted);">
-                ${item.context ? `<span style='background: var(--bg-tertiary); color: var(--text-secondary); border-radius: 6px; padding: 2px 10px; font-size: 11.5px;'>${item.context}</span>` : ''}
-                <span>${this.formatDate(item.savedAt)}</span>
-                ${item.url ? `<span style='display: flex; align-items: center; gap: 3px;'><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg><span class="note-url" style="cursor: pointer; text-decoration: underline; color: #0ea5e9;" title="${item.url}">${this.getDomainFromUrl(item.url)}</span></span>` : ''}
-              </div>
-              <div style="background: var(--bg-tertiary); border-radius: 12px; padding: 18px 16px 16px 16px; color: var(--text-primary); font-size: 14.5px; line-height: 1.7; margin-bottom: 12px; word-break: break-word;">${this.truncateText(item.content, 90)}</div>
-              ${item.summary ? `<div style="margin-top: 10px; padding: 12px 14px; background: linear-gradient(135deg, #6366f1 0%, #3b82f6 100%); color: #fff; border-radius: 10px; font-size: 13px; font-weight: 500;"><span style="font-size: 12px; font-weight: 600; letter-spacing: 0.01em;">AI Summary:</span><br>${item.summary}</div>` : ''}
-              ${actionItemsHtml}
+        (item) => `
+            <div class="saved-item" data-id="${item.id}">
+                <div class="saved-item-content">
+                    <div style="font-weight: 600; margin-bottom: 6px; color: var(--text-primary);">
+                        ${item.title}
+                    </div>
+                    <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 8px;">
+                        ${item.context ? item.context + ' • ' : ''}Saved ${this.formatDate(item.savedAt)}
+                    </div>
+                    <div style="font-size: 13px; color: var(--text-secondary); line-height: 1.4;">
+                        ${this.truncateText(item.content, 100)}
+                    </div>
+                </div>
+                <div class="saved-item-actions">
+                    <button class="edit-saved-item-btn" title="Edit note" style="background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 4px; border-radius: 4px;">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                        </svg>
+                    </button>
+                    <button class="delete-saved-item-btn" title="Delete note" style="background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 4px; border-radius: 4px;">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="3,6 5,6 21,6"></polyline>
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                        </svg>
+                    </button>
+                </div>
             </div>
-          `;
-        }
+        `
       )
       .join("");
 
     container.innerHTML = htmlContent;
 
     // Add event listeners using event delegation
-    container.onclick = (e) => {
-      const card = e.target.closest('.saved-note-clean');
-      if (!card) return;
-      const itemId = parseInt(card.dataset.id);
-      if (e.target.closest('.edit-saved-item')) {
-        this.editSavedItem(itemId);
-      } else if (e.target.closest('.delete-saved-item')) {
-        this.deleteSavedItem(itemId);
-      } else if (e.target.classList.contains('note-url')) {
-        // handled below
-      } else {
-        // Open modal on card click (but not on button/icon click)
-        const item = this.savedItems.find(i => i.id === itemId);
-        if (item) this.showNoteModal(item);
+    container.addEventListener('click', (e) => {
+      const savedItem = e.target.closest('.saved-item')
+      if (!savedItem) return
+      
+      const itemId = parseInt(savedItem.dataset.id)
+      
+      if (e.target.closest('.edit-saved-item-btn')) {
+        e.stopPropagation()
+        this.editSavedNote(itemId)
+      } else if (e.target.closest('.delete-saved-item-btn')) {
+        e.stopPropagation()
+        this.deleteSavedItem(itemId)
+      } else if (e.target.closest('.saved-item-content')) {
+        const item = this.savedItems.find(i => i.id === itemId)
+        if (item) this.showNoteModal(item)
       }
-      // Open URL
-      if (e.target.classList.contains('note-url')) {
-        const item = this.savedItems.find(i => i.id === itemId);
-        if (item && item.url) {
-          chrome.tabs.create({ url: item.url });
-        }
-      }
-    };
+    })
 
   }
 
@@ -1700,6 +1793,8 @@ class FloatyExtension {
     if (!container) return
 
     container.innerHTML = filtered
+      .slice()
+      .reverse()
       .map(
         (item) => `
             <div class="saved-item" data-id="${item.id}">
@@ -1714,6 +1809,20 @@ class FloatyExtension {
                         ${this.truncateText(item.content, 90)}
                     </div>
                 </div>
+                <div class="saved-item-actions">
+                    <button class="edit-saved-item-btn" title="Edit note" style="background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 4px; border-radius: 4px;">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                        </svg>
+                    </button>
+                    <button class="delete-saved-item-btn" title="Delete note" style="background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 4px; border-radius: 4px;">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="3,6 5,6 21,6"></polyline>
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                        </svg>
+                    </button>
+                </div>
             </div>
         `,
       )
@@ -1726,7 +1835,13 @@ class FloatyExtension {
       
       const itemId = parseInt(savedItem.dataset.id)
       
-      if (e.target.closest('.saved-item-content')) {
+      if (e.target.closest('.edit-saved-item-btn')) {
+        e.stopPropagation()
+        this.editSavedNote(itemId)
+      } else if (e.target.closest('.delete-saved-item-btn')) {
+        e.stopPropagation()
+        this.deleteSavedItem(itemId)
+      } else if (e.target.closest('.saved-item-content')) {
         const item = this.savedItems.find(i => i.id === itemId)
         if (item) this.showNoteModal(item)
       }
@@ -1747,7 +1862,34 @@ class FloatyExtension {
       this.highlights = []
       this.saveData()
       this.renderHighlights()
+      
+      // Clear yellow overlays from all pages
+      this.clearAllPageHighlights()
+      
       this.showNotification("All highlights cleared")
+    }
+  }
+
+  // Clear yellow overlays from all pages
+  clearAllPageHighlights() {
+    chrome.tabs.query({}, (tabs) => {
+      tabs.forEach(tab => {
+        chrome.tabs.sendMessage(tab.id, { action: 'clearAllPageHighlights' }, (response) => {
+          if (chrome.runtime.lastError) {
+            // Tab might not have content script, ignore error
+          }
+        })
+      })
+    })
+  }
+
+  clearAllTasks() {
+    if (confirm("Are you sure you want to clear all tasks?")) {
+      this.tasks = []
+      this.saveData()
+      this.renderTasks()
+      this.updateTaskStats()
+      this.showNotification("All tasks cleared")
     }
   }
 
@@ -1832,23 +1974,46 @@ class FloatyExtension {
   }
 
   deleteSavedItem(itemId) {
-    this.savedItems = this.savedItems.filter((item) => item.id !== itemId)
-    // Remove from chrome.storage.local.notes as well
-    chrome.storage.local.get({ notes: [] }, (result) => {
-      const updatedNotes = (result.notes || []).filter(note => note.id !== itemId)
-      chrome.storage.local.set({ notes: updatedNotes }, () => {
-    this.saveData()
-    this.renderSavedItems()
-    this.showNotification("Saved item deleted")
-      })
-    })
+    if (confirm("Are you sure you want to delete this note?")) {
+      this.savedItems = this.savedItems.filter((item) => item.id !== itemId)
+      this.saveData()
+      this.renderSavedItems()
+      this.showNotification("Note deleted")
+    }
   }
 
   deleteHighlight(highlightId) {
+    // Find the highlight to get its URL and content before deletion
+    const highlight = this.highlights.find(h => h.id === highlightId)
+    
     this.highlights = this.highlights.filter((highlight) => highlight.id !== highlightId)
     this.saveData()
     this.renderHighlights()
+    
+    // Remove yellow overlay from the specific page if highlight has URL and content
+    if (highlight && highlight.url && highlight.content) {
+      this.removeHighlightFromPage(highlight.url, highlight.content)
+    }
+    
     this.showNotification("Highlight deleted")
+  }
+
+  // Remove highlight from specific page
+  removeHighlightFromPage(url, content) {
+    chrome.tabs.query({}, (tabs) => {
+      tabs.forEach(tab => {
+        if (tab.url === url) {
+          chrome.tabs.sendMessage(tab.id, { 
+            action: 'removeSpecificHighlight',
+            content: content
+          }, (response) => {
+            if (chrome.runtime.lastError) {
+              // Tab might not have content script, ignore error
+            }
+          })
+        }
+      })
+    })
   }
 
   showHighlightModal(highlight) {
@@ -2001,29 +2166,34 @@ class FloatyExtension {
     container.parentNode.replaceChild(newContainer, container)
 
     newContainer.innerHTML = this.tasks
+      .slice()
       .map(
         (task) => `
             <div class="task-item${task.completed ? ' completed' : ''}" data-id="${task.id}">
                 <div class="task-content">
                     <input type="checkbox" class="task-checkbox" ${task.completed ? "checked" : ""}>
-                    <span class="task-text${task.completed ? ' task-text-completed' : ''}">${task.text}</span>
+                    <div style="flex: 1; display: flex; flex-direction: column; gap: 4px;">
+                        <span class="task-text${task.completed ? ' task-text-completed' : ''}">${task.text}</span>
+                        ${task.context ? `<div style="font-size: 12px; color: var(--text-muted);">${task.context}</div>` : ''}
+                        ${task.source ? `<div style="font-size: 11px; color: var(--text-muted);">From: ${task.source.noteTitle || 'Note'}</div>` : ''}
+                    </div>
                     <div class="task-priority">
                         <span class="priority-badge ${task.priority || 'medium'}">${task.priority || 'medium'}</span>
+                        <div class="task-actions">
+                            <button class="icon-btn edit-task-btn" title="Edit task">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                                </svg>
+                            </button>
+                            <button class="icon-btn delete-task-btn" title="Delete task">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polyline points="3,6 5,6 21,6"></polyline>
+                                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                </svg>
+                            </button>
+                        </div>
                     </div>
-                </div>
-                <div class="task-actions">
-                    <button class="icon-btn edit-task-btn" title="Edit task">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-                        </svg>
-                    </button>
-                    <button class="icon-btn delete-task-btn" title="Delete task">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <polyline points="3,6 5,6 21,6"></polyline>
-                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                        </svg>
-                    </button>
                 </div>
             </div>
         `
@@ -2045,6 +2215,9 @@ class FloatyExtension {
         this.deleteTask(taskId)
       }
     })
+
+    // Update task stats after rendering
+    this.updateTaskStats()
   }
 
   toggleTask(taskId) {
@@ -2209,10 +2382,9 @@ class FloatyExtension {
       ` : '';
 
     inner.innerHTML = `
-      <div style="font-size: 18px; font-weight: 600; margin-bottom: 12px;">${note.title || 'Note'}</div>
-      ${note.context ? `<div style="font-size: 13px; color: #888; margin-bottom: 10px;"><strong>Context:</strong> ${note.context}</div>` : ''}
+      <div style="font-size: 18px; font-weight: 600; margin-bottom: 12px;">${note.context || 'Note'}</div>
       ${note.url ? `
-        <div style="font-size: 12px; color: #666; margin-bottom: 10px; display: flex; align-items: center; gap: 6px;">
+        <div style="font-size: 12px; color: #666; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; padding-left: 20px;">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
             <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
@@ -2220,12 +2392,11 @@ class FloatyExtension {
           <span class="modal-note-url" style="cursor: pointer; text-decoration: underline; color: #0ea5e9;" title="${note.url}">${this.getDomainFromUrl(note.url)}</span>
         </div>
       ` : ''}
-      <div style="font-size: 15px; color: #222; margin-bottom: 18px; white-space: pre-wrap;">${note.content || note.text || ''}</div>
+      <div style="font-size: 15px; color: #222; margin-bottom: 18px; white-space: pre-wrap; border: 1px solid #e5e7eb; background: #f9fafb; padding: 16px; border-radius: 8px;">${note.content || note.text || ''}</div>
       ${actionItemsHTML}
       ${summaryHTML}
       <div style="margin-top: 16px; display: flex; gap: 8px; justify-content: center;">
-        ${!note.summary ? `<button id="generateSummaryBtn" style="padding: 8px 16px; background: linear-gradient(135deg, #8b5cf6 0%, #3b82f6 100%); color: white; border: none; border-radius: 6px; font-size: 14px; cursor: pointer;">Generate AI Summary</button>` : ''}
-        <button id="floaty-popup-close-modal-btn" style="padding: 8px 16px; background: #3b82f6; color: #fff; border: none; border-radius: 6px; font-size: 14px; cursor: pointer;">Close</button>
+        ${!note.summary ? `<button id="generateSummaryBtn" style="padding: 8px 16px; background: none; border: 1px solid #d1d5db; color: #374151; border-radius: 6px; font-size: 14px; cursor: pointer; display: flex; align-items: center; gap: 6px;">🤖 Generate AI Summary</button>` : ''}
       </div>
       <button id="floaty-popup-close-modal" style="position: absolute; top: 10px; right: 12px; background: none; border: none; font-size: 20px; color: #888; cursor: pointer;">×</button>
     `;
@@ -2234,9 +2405,7 @@ class FloatyExtension {
     document.body.appendChild(modal);
 
     // Close handlers
-    document.getElementById('floaty-popup-close-modal').onclick =
-      document.getElementById('floaty-popup-close-modal-btn').onclick =
-        () => modal.remove();
+    document.getElementById('floaty-popup-close-modal').onclick = () => modal.remove();
     
     // Generate summary handler
     const generateSummaryBtn = document.getElementById('generateSummaryBtn');
@@ -2324,6 +2493,11 @@ class FloatyExtension {
       case 'taskDetectionDialog':
         const taskDetectionDialog = document.getElementById('taskDetectionDialog')
         if (taskDetectionDialog) {
+          // Discard the pending note if user closes via Escape
+          if (this.pendingNote) {
+            this.pendingNote = null
+            this.showNotification('❌ Note creation cancelled')
+          }
           taskDetectionDialog.classList.add('hidden')
         }
         break
@@ -2387,7 +2561,7 @@ class FloatyExtension {
     if (!contentElement) return;
 
     const noteContent = contentElement.textContent;
-    const noteTitle = modal.querySelector('div[style*="font-size: 18px"]')?.textContent || 'Note';
+    const noteContext = modal.querySelector('div[style*="font-size: 18px"]')?.textContent || 'Note';
 
     this.showLoading("generateSummary");
 
@@ -2395,9 +2569,9 @@ class FloatyExtension {
       // Generate summary using Gemini
       const summary = await this.gemini.generateSummary(noteContent);
       
-      // Find the note in saved items by title and content
+      // Find the note in saved items by context and content
       const savedIndex = this.savedItems.findIndex((n) => 
-        n.title === noteTitle && n.content === noteContent
+        n.context === noteContext && n.content === noteContent
       );
       
       if (savedIndex !== -1) {
@@ -2406,6 +2580,16 @@ class FloatyExtension {
         
         // Update the modal to show the summary
         this.showNoteModal(this.savedItems[savedIndex]);
+      } else {
+        // Fallback: try to find by content only
+        const fallbackIndex = this.savedItems.findIndex((n) => n.content === noteContent);
+        if (fallbackIndex !== -1) {
+          this.savedItems[fallbackIndex].summary = summary;
+          this.saveData();
+          
+          // Update the modal to show the summary
+          this.showNoteModal(this.savedItems[fallbackIndex]);
+        }
       }
 
       this.showNotification("Summary generated");
@@ -2606,6 +2790,28 @@ class FloatyExtension {
     }
   }
 
+  // Save note textarea content to storage
+  saveNoteTextareaContent() {
+    const noteTextarea = document.getElementById('noteText')
+    if (noteTextarea) {
+      const content = noteTextarea.value
+      chrome.storage.local.set({ noteTextareaContent: content }, () => {
+        console.log('[Floaty] Note textarea content saved')
+      })
+    }
+  }
+
+  // Load note textarea content from storage
+  loadNoteTextareaContent() {
+    chrome.storage.local.get(['noteTextareaContent'], (result) => {
+      const noteTextarea = document.getElementById('noteText')
+      if (noteTextarea && result.noteTextareaContent) {
+        noteTextarea.value = result.noteTextareaContent
+        console.log('[Floaty] Note textarea content restored')
+      }
+    })
+  }
+
   // Task Detection Methods
   showTaskDetectionDialog(tasks) {
     const extractTasks = document.getElementById("extractTasksCheckbox");
@@ -2636,7 +2842,7 @@ class FloatyExtension {
     `).join('')
 
     // Update button text
-    addButton.textContent = `Add ${tasks.length} Task${tasks.length !== 1 ? 's' : ''} to Action Items`
+    addButton.textContent = `Add ${tasks.length} Task${tasks.length !== 1 ? 's' : ''}`
 
     dialog.classList.remove('hidden')
 
@@ -2671,7 +2877,7 @@ class FloatyExtension {
     
     if (addButton) {
       const count = checkboxes.length
-      addButton.textContent = `Add ${count} Task${count !== 1 ? 's' : ''} to Action Items`
+      addButton.textContent = `Add ${count} Task${count !== 1 ? 's' : ''}`
     }
   }
 
@@ -2682,38 +2888,33 @@ class FloatyExtension {
       return this.detectedTasks[index]
     })
 
-    // Only add tasks to global tasks list if they're not already action items in notes
+    // Save the pending note first
+    if (this.pendingNote) {
+      this.saveNoteToStorage(this.pendingNote)
+      this.pendingNote = null
+    }
+
+    // Add all selected tasks to global tasks list (no duplicate checking for newly approved tasks)
     let addedCount = 0
     selectedTasks.forEach(task => {
-      // Check if this task already exists as an action item in any saved note
-      const isDuplicate = this.savedItems.some(item => 
-        item.actionItems && item.actionItems.some(actionItem => {
-          const actionText = typeof actionItem === 'string' ? actionItem : actionItem.text
-          return actionText.toLowerCase() === task.text.toLowerCase()
-        })
-      )
-
-      // Only add if it's not a duplicate
-      if (!isDuplicate) {
-        this.tasks.push({
-          id: Date.now() + Math.floor(Math.random() * 1000000),
-          text: task.text,
-          context: task.context,
-          priority: task.priority,
-          completed: false,
-          createdAt: new Date().toISOString()
-        })
-        addedCount++
-      }
+      this.tasks.push({
+        id: Date.now() + Math.floor(Math.random() * 1000000),
+        text: task.text,
+        context: task.context,
+        priority: task.priority,
+        completed: false,
+        createdAt: new Date().toISOString()
+      })
+      addedCount++
     })
 
     // Update storage and UI
     if (addedCount > 0) {
       this.saveData()
       this.renderTasks()
-      this.showNotification(`Added ${addedCount} new task${addedCount > 1 ? 's' : ''} to global list`)
+      this.showNotification(`✅ Note saved and ${addedCount} task${addedCount !== 1 ? 's' : ''} added to global list`)
     } else {
-      this.showNotification('All selected tasks are already action items in your notes')
+      this.showNotification('✅ Note saved successfully')
     }
     
     this.hideTaskDetectionDialog()
@@ -2911,15 +3112,36 @@ class FloatyExtension {
           item.actionItems = []
         }
 
-        // Add the new action item
-        item.actionItems.push({
+        // Add the new action item to the note
+        const newActionItem = {
           text: newText,
           completed: false
+        }
+        item.actionItems.push(newActionItem)
+
+        // Also add to global tasks list
+        this.tasks.push({
+          id: Date.now() + Math.floor(Math.random() * 1000000),
+          text: newText,
+          context: item.context || '',
+          priority: 'medium',
+          completed: false,
+          createdAt: new Date().toISOString(),
+          source: {
+            noteId: item.id,
+            noteTitle: item.title || item.context || 'Note',
+            url: item.url || ''
+          }
         })
 
         this.saveData()
         this.renderSavedItems()
-        this.showNotification('Action item added successfully')
+        this.renderTasks()
+        this.showNotification('Action item added to note and global tasks')
+        
+        // Refresh the modal to show the new action item
+        this.showNoteModal(item)
+        
         closeModal()
       } else {
         this.showNotification('Action item text cannot be empty', 'error')
@@ -3211,6 +3433,275 @@ class FloatyExtension {
     if (searchInput) {
       searchInput.focus()
     }
+  }
+
+  editSavedNote(itemId) {
+    const item = this.savedItems.find(i => i.id === itemId)
+    if (!item) return
+
+    // Create edit modal
+    const modal = document.createElement('div')
+    modal.id = 'floaty-edit-note-modal'
+    modal.style.cssText = `
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.25); z-index: 10001;
+      display: flex; align-items: center; justify-content: center;
+    `
+
+    const inner = document.createElement('div')
+    inner.style.cssText = `
+      background: #fff; border-radius: 10px; box-shadow: 0 4px 24px rgba(0,0,0,0.18);
+      padding: 24px 28px; min-width: 320px; max-width: 90vw; max-height: 80vh; overflow-y: auto;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; position: relative;
+    `
+
+    inner.innerHTML = `
+      <div style="font-size: 18px; font-weight: 600; margin-bottom: 12px;">Edit Note</div>
+      
+      <div style="margin-bottom: 16px;">
+        <label style="display: block; font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">Title:</label>
+        <input type="text" id="editNoteTitle" value="${item.title || ''}" style="width: 100%; padding: 10px 12px; background: var(--bg-secondary); border: 1px solid var(--border-light); border-radius: var(--radius-lg); font-size: 14px; color: var(--text-primary);">
+      </div>
+      
+      <div style="margin-bottom: 16px;">
+        <label style="display: block; font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">Context:</label>
+        <input type="text" id="editNoteContext" value="${item.context || ''}" style="width: 100%; padding: 10px 12px; background: var(--bg-secondary); border: 1px solid var(--border-light); border-radius: var(--radius-lg); font-size: 14px; color: var(--text-primary);">
+      </div>
+      
+      <div style="margin-bottom: 20px;">
+        <label style="display: block; font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">Content:</label>
+        <textarea id="editNoteContent" rows="8" style="width: 100%; padding: 12px; background: var(--bg-secondary); border: 1px solid var(--border-light); border-radius: var(--radius-lg); white-space: pre-wrap; line-height: 1.5; font-size: 14px; color: var(--text-primary); resize: vertical;">${item.content || ''}</textarea>
+      </div>
+      
+      <div style="display: flex; gap: 8px; justify-content: center;">
+        <button class="cancel-btn" style="padding: 8px 16px; background: none; border: 1px solid var(--border-color); color: var(--text-primary); border-radius: var(--radius-lg); font-size: 14px; cursor: pointer;">Cancel</button>
+        <button class="save-btn" style="padding: 8px 16px; border: none; background: var(--primary-color); color: white; border-radius: var(--radius-lg); font-size: 14px; cursor: pointer;">Save Changes</button>
+      </div>
+      
+      <button id="floaty-edit-close-modal" style="position: absolute; top: 10px; right: 12px; background: none; border: none; font-size: 20px; color: #888; cursor: pointer;">×</button>
+    `
+
+    modal.appendChild(inner)
+    document.body.appendChild(modal)
+
+    // Add event listeners
+    const closeBtn = document.getElementById('floaty-edit-close-modal')
+    const cancelBtn = modal.querySelector('.cancel-btn')
+    const saveBtn = modal.querySelector('.save-btn')
+
+    const closeModal = () => {
+      if (modal.parentNode) {
+        modal.parentNode.removeChild(modal)
+      }
+    }
+
+    closeBtn.onclick = closeModal
+    cancelBtn.addEventListener('click', closeModal)
+
+    saveBtn.addEventListener('click', () => {
+      const title = document.getElementById('editNoteTitle').value.trim()
+      const context = document.getElementById('editNoteContext').value.trim()
+      const content = document.getElementById('editNoteContent').value.trim()
+
+      if (!content) {
+        this.showNotification("Note content cannot be empty", "error")
+        return
+      }
+
+      // Update the note
+      item.title = title || this.fallbackTitle(content, context)
+      item.context = context
+      item.content = content
+      item.updatedAt = new Date().toISOString()
+
+      this.saveData()
+      this.renderSavedItems()
+      this.showNotification("Note updated successfully")
+      closeModal()
+    })
+
+    // Focus on title input
+    setTimeout(() => {
+      document.getElementById('editNoteTitle').focus()
+    }, 100)
+  }
+
+  openDictationModal() {
+    // Create dictation modal
+    const modal = document.createElement('div')
+    modal.id = 'floaty-dictation-modal'
+    modal.style.cssText = `
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.25); z-index: 10001;
+      display: flex; align-items: center; justify-content: center;
+    `
+
+    const inner = document.createElement('div')
+    inner.style.cssText = `
+      background: #fff; border-radius: 10px; box-shadow: 0 4px 24px rgba(0,0,0,0.18);
+      padding: 24px 28px; min-width: 400px; max-width: 90vw; max-height: 80vh; overflow-y: auto;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    `
+
+    inner.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <h3 style="margin: 0; font-size: 18px; font-weight: 600;">Voice Dictation</h3>
+        <button class="close-btn" style="background: none; border: none; font-size: 24px; cursor: pointer; color: #666;">×</button>
+      </div>
+      
+      <div style="margin-bottom: 16px;">
+        <div id="dictationStatus" style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+          <div id="dictationIndicator" style="width: 12px; height: 12px; border-radius: 50%; background: #dc3545; animation: pulse 1.5s infinite;"></div>
+          <span id="dictationText">Click Start to begin dictation...</span>
+        </div>
+        
+        <div style="display: flex; gap: 8px; margin-bottom: 16px;">
+          <button id="startDictationBtn" style="padding: 8px 16px; border: none; background: #28a745; color: white; border-radius: 6px; cursor: pointer;">Start</button>
+          <button id="pauseDictationBtn" style="padding: 8px 16px; border: 1px solid #ddd; background: #f8f9fa; border-radius: 6px; cursor: pointer; display: none;">Pause</button>
+          <button id="stopDictationBtn" style="padding: 8px 16px; border: 1px solid #ddd; background: #f8f9fa; border-radius: 6px; cursor: pointer; display: none;">Stop</button>
+        </div>
+      </div>
+      
+      <div style="margin-bottom: 20px;">
+        <label style="display: block; margin-bottom: 6px; font-weight: 500; color: #333;">Transcribed Text:</label>
+        <textarea id="dictationTextarea" rows="8" style="width: 100%; padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; resize: vertical; color: #333 !important;" placeholder="Your speech will appear here..."></textarea>
+      </div>
+      
+      <div style="display: flex; gap: 12px; justify-content: flex-end;">
+        <button class="cancel-btn" style="padding: 8px 16px; border: 1px solid #ddd; background: #f8f9fa; border-radius: 6px; cursor: pointer;">Cancel</button>
+        <button id="addToNoteBtn" style="padding: 8px 16px; border: none; background: #007bff; color: white; border-radius: 6px; cursor: pointer;">Add to Note</button>
+      </div>
+      
+      <style>
+        @keyframes pulse {
+          0% { opacity: 1; }
+          50% { opacity: 0.5; }
+          100% { opacity: 1; }
+        }
+      </style>
+    `
+
+    modal.appendChild(inner)
+    document.body.appendChild(modal)
+
+    // Get elements
+    const closeBtn = modal.querySelector('.close-btn')
+    const cancelBtn = modal.querySelector('.cancel-btn')
+    const startBtn = modal.querySelector('#startDictationBtn')
+    const pauseBtn = modal.querySelector('#pauseDictationBtn')
+    const stopBtn = modal.querySelector('#stopDictationBtn')
+    const addToNoteBtn = modal.querySelector('#addToNoteBtn')
+    const dictationTextarea = modal.querySelector('#dictationTextarea')
+    const dictationIndicator = modal.querySelector('#dictationIndicator')
+    const dictationText = modal.querySelector('#dictationText')
+
+    let isRecording = false
+    let recognition = null
+
+    const closeModal = () => {
+      if (isRecording && recognition) {
+        recognition.stop()
+      }
+      if (modal.parentNode) {
+        modal.parentNode.removeChild(modal)
+      }
+    }
+
+    const startDictation = () => {
+      if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+        dictationText.textContent = 'Speech recognition not supported in this browser'
+        return
+      }
+
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+      recognition = new SpeechRecognition()
+      
+      recognition.continuous = true
+      recognition.interimResults = true
+      recognition.lang = 'en-US'
+
+      recognition.onstart = () => {
+        isRecording = true
+        startBtn.style.display = 'none'
+        pauseBtn.style.display = 'inline-block'
+        stopBtn.style.display = 'inline-block'
+        dictationIndicator.style.background = '#28a745'
+        dictationText.textContent = 'Listening...'
+      }
+
+      recognition.onresult = (event) => {
+        let finalTranscript = ''
+        let interimTranscript = ''
+
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript
+          if (event.results[i].isFinal) {
+            finalTranscript += transcript + ' '
+          } else {
+            interimTranscript += transcript
+          }
+        }
+
+        dictationTextarea.value = finalTranscript + interimTranscript
+      }
+
+      recognition.onerror = (event) => {
+        console.error('Speech recognition error:', event.error)
+        dictationText.textContent = `Error: ${event.error}`
+        stopDictation()
+      }
+
+      recognition.onend = () => {
+        isRecording = false
+        startBtn.style.display = 'inline-block'
+        pauseBtn.style.display = 'none'
+        stopBtn.style.display = 'none'
+        dictationIndicator.style.background = '#dc3545'
+        dictationText.textContent = 'Dictation stopped'
+      }
+
+      recognition.start()
+    }
+
+    const pauseDictation = () => {
+      if (recognition) {
+        recognition.stop()
+      }
+    }
+
+    const stopDictation = () => {
+      if (recognition) {
+        recognition.stop()
+      }
+    }
+
+    const addToNote = () => {
+      const text = dictationTextarea.value.trim()
+      if (text) {
+        const noteTextarea = document.getElementById('noteText')
+        if (noteTextarea) {
+          const currentText = noteTextarea.value
+          const separator = currentText ? '\n\n' : ''
+          noteTextarea.value = currentText + separator + text
+          this.saveNoteTextareaContent()
+          this.showNotification('Text added to note')
+        }
+      }
+      closeModal()
+    }
+
+    // Add event listeners
+    closeBtn.addEventListener('click', closeModal)
+    cancelBtn.addEventListener('click', closeModal)
+    startBtn.addEventListener('click', startDictation)
+    pauseBtn.addEventListener('click', pauseDictation)
+    stopBtn.addEventListener('click', stopDictation)
+    addToNoteBtn.addEventListener('click', addToNote)
+
+    // Auto-start dictation
+    setTimeout(() => {
+      startDictation()
+    }, 500)
   }
 }
 
